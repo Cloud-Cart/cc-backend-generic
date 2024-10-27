@@ -1,7 +1,7 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField
-from rest_framework.serializers import ModelSerializer
+from rest_framework.serializers import ModelSerializer, Serializer, IntegerField
 
 from Users.models import User
 
@@ -23,12 +23,12 @@ class RegisterSerializer(ModelSerializer):
         instance = super().save()
         instance.set_password(password)
         instance.save()
-        # todo: send email otp
         return instance
 
     class Meta:
         model = User
         fields = [
+            'id',
             'email',
             'password',
             'confirm_password',

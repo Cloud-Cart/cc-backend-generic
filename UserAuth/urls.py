@@ -6,8 +6,7 @@ from UserAuth.views import AuthenticationViewSet
 
 router = DefaultRouter()
 router.register('', AuthenticationViewSet, basename='auth')
-
-urlpatterns = [
+urlpatterns = router.urls
+urlpatterns += [
     path('login/', TokenObtainPairView.as_view(), name='login'),
 ]
-urlpatterns += router.urls
