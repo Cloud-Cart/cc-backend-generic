@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "cloudcart"
+version = "0.1.0"
+description = ""
+authors = ["Shahsad KP <shahsadkpklr@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+django = "^5.1.2"
+django-environ = "^0.11.2"
+djangorestframework = "^3.15.2"
+djangorestframework-simplejwt = "^5.3.1"
+django-tenants = "^3.7.0"
+psycopg2 = "^2.9.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
