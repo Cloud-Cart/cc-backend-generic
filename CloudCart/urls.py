@@ -21,6 +21,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     re_path(
         r'^(?P<version>(v1|v2))/auth/',
-        include('UserAuth.urls', namespace='UserAuth'),
+        include('UserAuth.urls'),
+    ),
+    re_path(
+        r'^(?P<version>(v1|v2))/users/',
+        include('Users.urls'),
     ),
 ]

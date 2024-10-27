@@ -11,5 +11,3 @@ urlpatterns = [
     path('login/', TokenObtainPairView.as_view(), name='login'),
 ]
 urlpatterns += router.urls
-
-app_name = 'UserAuth'

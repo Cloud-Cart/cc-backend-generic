@@ -10,7 +10,7 @@ from Users.managers import UserManager
 class User(AbstractUser):
     id = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = None
-    email = EmailField(_("email address"), unique=True)
+    email = EmailField(_("Email Address"), unique=True)
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = [
         "first_name",
