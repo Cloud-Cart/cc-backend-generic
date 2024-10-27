@@ -168,3 +168,18 @@ SITE_ID = 1
 
 # Celery settings
 CELERY_BROKER_URL = env.str('CELERY_BROKER_URL')
+
+# Email settings
+# https://docs.djangoproject.com/en/5.1/topics/email/#email-backends
+
+EMAIL_BACKEND = env.str('EMAIL_BACKEND')
+EMAIL_FILE_PATH = env.str('EMAIL_FILE_PATH', default=BASE_DIR / 'emails')
+EMAIL_HOST = env.str('EMAIL_HOST', default=None)
+EMAIL_PORT = env.int('EMAIL_PORT', default=25)
+EMAIL_HOST_USER = env.str('EMAIL_HOST_USER', default=None)
+EMAIL_HOST_PASSWORD = env.str('EMAIL_HOST_PASSWORD', default=None)
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=True)
+EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=None)
+EMAIL_SSL_KEYFILE = env.str('EMAIL_SSL_KEYFILE', default=None)
+EMAIL_SSL_CERTFILE = env.str('EMAIL_SSL_CERTFILE', default=None)
