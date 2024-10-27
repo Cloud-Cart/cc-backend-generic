@@ -165,3 +165,6 @@ REST_FRAMEWORK = {
 AUTH_USER_MODEL = 'Users.User'
 
 SITE_ID = 1
+
+# Celery settings
+CELERY_BROKER_URL = env.str('CELERY_BROKER_URL')
