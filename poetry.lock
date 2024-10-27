@@ -651,6 +651,20 @@ dev = ["build", "hatch"]
 doc = ["sphinx"]
 
 [[package]]
+name = "tenant-schemas-celery"
+version = "3.0.0"
+description = "Celery integration for django-tenant-schemas and django-tenants"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "tenant_schemas_celery-3.0.0-py3-none-any.whl", hash = "sha256:ca0f69e78ef698eb4813468231df5a0ab6a660c08e657b65f5ac92e16887eec8"},
+    {file = "tenant_schemas_celery-3.0.0.tar.gz", hash = "sha256:6be3ae1a5826f262f0f3dd343c6a85a34a1c59b89e04ae37de018f36562fed55"},
+]
+
+[package.dependencies]
+celery = "*"
+
+[[package]]
 name = "tzdata"
 version = "2024.2"
 description = "Provider of IANA time zone data"
@@ -758,4 +772,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "2d9f6e0c0e90cc65cdde677c8a1ac997535b687dbab39f1fc7ecfed187550ff4"
+content-hash = "ad53e8349a140c6d2c3c7b6ee6a4853a0ab17c526c147890545e247ea8652b2a"
