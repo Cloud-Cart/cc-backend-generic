@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from UserAuth.models import OTPAuthentication, HOTPAuthentication
+from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication
 from UserAuth.permissions import IsOwnAuthenticator
 from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer
 from UserAuth.tasks import generate_and_send_otp, send_new_authentication_app_created_email
@@ -58,7 +58,7 @@ class AuthenticationViewSet(GenericViewSet):
 
     @action(
         url_path='activate-hotp-authentication',
-        methods=['POST'],
+        methods=['PATCH'],
         serializer_class=VerifyOTPSerializer,
         permission_classes=[IsOwnAuthenticator],
         detail=True,
@@ -78,3 +78,96 @@ class AuthenticationViewSet(GenericViewSet):
         ser.save()
         send_new_authentication_app_created_email.delay(str(request.user.id), str(authenticator.id))
         return Response(data=ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["PATCH"],
+        url_path='enable-otp-authentication',
+        permission_classes=[IsAuthenticated],
+    )
+    def enable_otp_authentication(self, request, *args, **kwargs):
+        auth: Authentication = request.user.authentication
+        if auth.otp_2fa_enabled:
+            return Response(
+                {
+                    'error': 'OTP Verification is already enabled',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+
+        if not auth.email_verified:
+            return Response(
+                {
+                    'error': 'Email not verified to enable OTP authentication',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+
+        auth.otp_2fa_enabled = True
+        auth.save()
+        return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["PATCH"],
+        url_path='disable-otp-authentication',
+        permission_classes=[IsAuthenticated],
+    )
+    def disable_otp_authentication(self, request, *args, **kwargs):
+        auth: Authentication = request.user.authentication
+        if not auth.otp_2fa_enabled:
+            return Response(
+                {
+                    'error': 'OTP Verification is already disabled',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+        auth.otp_2fa_enabled = False
+        auth.save()
+        return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["PATCH"],
+        url_path='enable-2fa-authentication',
+        permission_classes=[IsAuthenticated],
+    )
+    def enable_2fa_authentication(self, request, *args, **kwargs):
+        auth: Authentication = request.user.authentication
+        if auth.otp_2fa_enabled:
+            return Response(
+                {
+                    'error': '2FA already enabled',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+        is_authenticator_apps = auth.hotp_authentications.filter(is_active=True).exists()
+        if not (is_authenticator_apps or auth.otp_2fa_enabled):
+            return Response(
+                {
+                    'error': 'Setup OTP Verification or Authenticator before enabling 2FA authentication',
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        auth.is_2fa_enabled = True
+        auth.save()
+        return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["PATCH"],
+        url_path='disable-2fa-authentication',
+        permission_classes=[IsAuthenticated],
+    )
+    def disable_2fa_authentication(self, request, *args, **kwargs):
+        auth: Authentication = request.user.authentication
+        if not auth.otp_2fa_enabled:
+            return Response(
+                {
+                    'error': '2FA already disabled',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+        auth.is_2fa_enabled = False
+        auth.save()
+        return Response(data={}, status=status.HTTP_200_OK)
