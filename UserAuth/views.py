@@ -53,8 +53,7 @@ class AuthenticationViewSet(GenericViewSet):
         serializer = self.get_serializer(data=request.data, context={'creating': True})
         serializer.is_valid(raise_exception=True)
         user: User = request.user
-        authenticator_app: HOTPAuthentication = serializer.save(authentication=user.authentication)
-        send_new_authentication_app_created_email.delay(str(user.id), str(authenticator_app.id))
+        serializer.save(authentication=user.authentication)
         return Response(data=serializer.data, status=status.HTTP_201_CREATED)
 
     @action(
@@ -77,4 +76,5 @@ class AuthenticationViewSet(GenericViewSet):
         ser = self.get_serializer(instance=authenticator, data=request.data)
         ser.is_valid(raise_exception=True)
         ser.save()
+        send_new_authentication_app_created_email.delay(str(request.user.id), str(authenticator.id))
         return Response(data=ser.data, status=status.HTTP_200_OK)
