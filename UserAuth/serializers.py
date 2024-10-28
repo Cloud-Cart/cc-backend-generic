@@ -1,15 +1,16 @@
+from django.contrib.auth.hashers import make_password
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField
 from rest_framework.serializers import ModelSerializer, Serializer, IntegerField
 
+from UserAuth.models import Authentication
 from Users.models import User
 
 
 class RegisterSerializer(ModelSerializer):
-    confirm_password = CharField(
-        write_only=True,
-    )
+    confirm_password = CharField(write_only=True)
+    password = CharField(write_only=True,)
 
     def validate(self, attrs):
         confirm_password = attrs.pop('confirm_password')
@@ -20,10 +21,9 @@ class RegisterSerializer(ModelSerializer):
 
     def save(self):
         password = self.validated_data.pop('password')
-        instance = super().save()
-        instance.set_password(password)
-        instance.save()
-        return instance
+        email = self.validated_data.get('email')
+        self.instance = User.objects.create_user(email=email, password=password, is_active=False)
+        return self.instance
 
     class Meta:
         model = User
@@ -52,8 +52,10 @@ class VerifyOTPSerializer(Serializer):
         return value
 
     def save(self):
-        user: User = self.instance.user
-        user.is_email_verified = True
+        auth: Authentication = self.instance.authentication
+        auth.email_verified = True
+        auth.save()
+        user = auth.user
         user.is_active = True
         user.save()
         self.instance.delete()

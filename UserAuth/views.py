@@ -26,7 +26,7 @@ class AuthenticationViewSet(GenericViewSet):
         methods=["POST"],
         serializer_class=VerifyOTPSerializer,
         url_path='verify-otp',
-        lookup_field='user_id',
+        lookup_field='authentication__user_id',
         lookup_url_kwarg='pk',
         queryset=OTPAuthentication
     )
@@ -38,3 +38,5 @@ class AuthenticationViewSet(GenericViewSet):
         return Response({
             'success': True,
         })
+
+
