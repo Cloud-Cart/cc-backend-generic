@@ -1,16 +1,15 @@
-from django.contrib.auth.hashers import make_password
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField
 from rest_framework.serializers import ModelSerializer, Serializer, IntegerField
 
-from UserAuth.models import Authentication
+from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication
 from Users.models import User
 
 
 class RegisterSerializer(ModelSerializer):
     confirm_password = CharField(write_only=True)
-    password = CharField(write_only=True,)
+    password = CharField(write_only=True, )
 
     def validate(self, attrs):
         confirm_password = attrs.pop('confirm_password')
@@ -52,16 +51,46 @@ class VerifyOTPSerializer(Serializer):
         return value
 
     def save(self):
-        auth: Authentication = self.instance.authentication
-        auth.email_verified = True
-        auth.save()
-        user = auth.user
-        user.is_active = True
-        user.save()
-        self.instance.delete()
-        return user
+        if isinstance(self.instance, OTPAuthentication):
+            auth: Authentication = self.instance.authentication
+            auth.email_verified = True
+            auth.save()
+            user = auth.user
+            user.is_active = True
+            user.save()
+            self.instance.delete()
+            return user
+        if isinstance(self.instance, HOTPAuthentication):
+            app: HOTPAuthentication = self.instance
+            app.is_active = True
+            app.save()
+            return app
+        return None
 
     class Meta:
         fields = [
             'otp'
         ]
+
+
+class AuthenticatorAppSerializer(ModelSerializer):
+    class Meta:
+        model = HOTPAuthentication
+        fields = [
+            'id',
+            'name',
+            'is_active',
+            'created_at',
+            'authentication_id'
+        ]
+        extra_kwargs = {
+            'is_active': {'read_only': True},
+            'created_at': {'read_only': True},
+            'authentication_id': {'read_only': True},
+        }
+
+    def to_representation(self, instance: HOTPAuthentication):
+        data = super().to_representation(instance)
+        if self.context.get('creating'):
+            data['secret'] = instance.secret
+        return data

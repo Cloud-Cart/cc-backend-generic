@@ -16,6 +16,7 @@ psycopg2 = "^2.9.10"
 celery = {extras = ["redis"], version = "^5.4.0"}
 gevent = "^24.10.3"
 tenant-schemas-celery = "^3.0.0"
+pyotp = "^2.9.0"
 
 
 [build-system]

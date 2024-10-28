@@ -4,8 +4,9 @@ from uuid import uuid4
 
 from django.contrib.auth.hashers import make_password, check_password, acheck_password, is_password_usable
 from django.db.models import Model, CASCADE, OneToOneField, UUIDField, Index, CharField, DateTimeField, EmailField, \
-    BooleanField, ForeignKey
+    BooleanField, ForeignKey, PositiveSmallIntegerField
 from django.utils import timezone
+from pyotp import random_base32, TOTP
 
 from UserAuth.utils import generate_recovery_codes
 from Users.models import User
@@ -131,9 +132,12 @@ class Authentication(Model):
 
 class HOTPAuthentication(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
+    created_at = DateTimeField(auto_now_add=True)
+    failed_for = PositiveSmallIntegerField(default=0)
     authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='hotp_authentications')
-    secret = CharField(max_length=128, null=True)
-    name = CharField(max_length=128, null=True)
+    is_active = BooleanField(default=False)
+    secret = CharField(max_length=128, editable=False, default=random_base32)
+    name = CharField(max_length=128)
 
     class Meta:
         db_table = 'hotp_authentication'
@@ -145,6 +149,16 @@ class HOTPAuthentication(Model):
 
     def __str__(self):
         return f"{self.name} of {self.authentication}"
+
+    def verify_otp(self, code: str):
+        return self._totp.verify(code)
+
+    def now(self):
+        return self._totp.now()
+
+    @property
+    def _totp(self):
+        return TOTP(self.secret)
 
 
 class RecoveryCode(Model):
