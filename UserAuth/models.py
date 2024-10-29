@@ -1,5 +1,5 @@
 import random
-from datetime import timedelta
+from datetime import timedelta, datetime
 from uuid import uuid4
 
 from django.contrib.auth.hashers import make_password, check_password, acheck_password, is_password_usable
@@ -7,7 +7,10 @@ from django.db.models import Model, CASCADE, OneToOneField, UUIDField, Index, Ch
     BooleanField, ForeignKey, PositiveSmallIntegerField
 from django.utils import timezone
 from pyotp import random_base32, TOTP
+from rest_framework_simplejwt.tokens import RefreshToken
 
+from CloudCart.celery import app
+from UserAuth.choices import OTPPurpose
 from UserAuth.utils import generate_recovery_codes
 from Users.models import User
 
@@ -16,6 +19,7 @@ class OTPAuthentication(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
     authentication = OneToOneField('Authentication', on_delete=CASCADE, related_name='otp')
     otp_hash = CharField(max_length=128, null=True)
+    otp_purpose = PositiveSmallIntegerField(choices=OTPPurpose.choices)
     expires_at = DateTimeField(null=True)
 
     class Meta:
@@ -38,9 +42,10 @@ class OTPAuthentication(Model):
         return check_password(str(otp), self.otp_hash)
 
     @classmethod
-    def generate_otp(cls, auth: 'Authentication') -> int:
+    def generate_otp(cls, auth: 'Authentication', purpose: OTPPurpose) -> int:
         otp = random.randint(100000, 999999)
-        obj = cls.objects.create(authentication=auth)
+        cls.objects.filter(authentication=auth).delete()
+        obj = cls.objects.create(authentication=auth, otp_purpose=purpose)
         obj.set_otp(otp)
         obj.save()
         return otp
@@ -71,6 +76,15 @@ class Authentication(Model):
         indexes = [
             Index(fields=['user']),
         ]
+
+    @property
+    def auth_tokens(self):
+        refresh_token = RefreshToken.for_user(self.user)
+        app.send_task('UserAuth.tasks.send_logined_email_notification', args=[str(self.user_id)])
+        return {
+            'refresh': str(refresh_token),
+            'access': str(refresh_token.access_token),
+        }
 
     def __str__(self):
         return f"Authentication of {self.user}"
@@ -138,6 +152,7 @@ class HOTPAuthentication(Model):
     is_active = BooleanField(default=False)
     secret = CharField(max_length=128, editable=False, default=random_base32)
     name = CharField(max_length=128)
+    last_used = DateTimeField(null=True)
 
     class Meta:
         db_table = 'hotp_authentication'
@@ -150,8 +165,8 @@ class HOTPAuthentication(Model):
     def __str__(self):
         return f"{self.name} of {self.authentication}"
 
-    def verify_otp(self, code: str):
-        return self._totp.verify(code)
+    def verify_otp(self, code: str = None, for_time: datetime = None, window: int = 0):
+        return self._totp.verify(code, for_time=for_time, valid_window=window)
 
     def now(self):
         return self._totp.now()
@@ -174,3 +189,14 @@ class RecoveryCode(Model):
 
     def __str__(self):
         return f"{self.authentication}"
+
+
+class IncompleteLoginSessions(Model):
+    id = UUIDField(primary_key=True, default=uuid4, editable=False)
+    created_at = DateTimeField(auto_now_add=True)
+    auth = OneToOneField(Authentication, on_delete=CASCADE, related_name='incomplete_session')
+
+    class Meta:
+        db_table = 'incomplete_sessions'
+        verbose_name = 'Incomplete Login Session'
+        verbose_name_plural = 'Incomplete Login Sessions'

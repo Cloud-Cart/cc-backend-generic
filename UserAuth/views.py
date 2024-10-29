@@ -3,11 +3,15 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from UserAuth.authentications import IncompleteLoginAuthentication
 from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication
 from UserAuth.permissions import IsOwnAuthenticator
-from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer
-from UserAuth.tasks import generate_and_send_otp, send_new_authentication_app_created_email
+from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
+    TwoFactorSettingsSerializer, CompleteLoginSerializer
+from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
+    generate_and_send_2fa_otp
 from Users.models import User
 
 
@@ -21,7 +25,7 @@ class AuthenticationViewSet(GenericViewSet):
         ser = self.get_serializer(data=request.data)
         ser.is_valid(raise_exception=True)
         user = ser.save()
-        generate_and_send_otp.delay(str(user.id))
+        generate_and_send_verification_otp.delay(str(user.id))
         return Response(data=ser.data, status=status.HTTP_201_CREATED)
 
     @action(
@@ -41,6 +45,22 @@ class AuthenticationViewSet(GenericViewSet):
         return Response({
             'success': True,
         })
+
+    @action(
+        detail=False,
+        url_path='login',
+        methods=['POST'],
+        serializer_class=LoginSerializer
+    )
+    def login(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        auth = ser.save()
+        if auth.is_2fa_enabled:
+            status_code = status.HTTP_206_PARTIAL_CONTENT
+        else:
+            status_code = status.HTTP_200_OK
+        return Response(ser.data, status=status_code)
 
     @action(
         url_path='create-hotp-authentication',
@@ -134,7 +154,7 @@ class AuthenticationViewSet(GenericViewSet):
     )
     def enable_2fa_authentication(self, request, *args, **kwargs):
         auth: Authentication = request.user.authentication
-        if auth.otp_2fa_enabled:
+        if auth.is_2fa_enabled:
             return Response(
                 {
                     'error': '2FA already enabled',
@@ -161,7 +181,7 @@ class AuthenticationViewSet(GenericViewSet):
     )
     def disable_2fa_authentication(self, request, *args, **kwargs):
         auth: Authentication = request.user.authentication
-        if not auth.otp_2fa_enabled:
+        if not auth.is_2fa_enabled:
             return Response(
                 {
                     'error': '2FA already disabled',
@@ -171,3 +191,42 @@ class AuthenticationViewSet(GenericViewSet):
         auth.is_2fa_enabled = False
         auth.save()
         return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path='2fa',
+        permission_classes=[IsAuthenticated],
+        serializer_class=TwoFactorSettingsSerializer,
+        authentication_classes=(IncompleteLoginAuthentication, JWTAuthentication)
+    )
+    def get_2fa_settings(self, request, *args, **kwargs):
+        auth = request.user.authentication
+        ser = self.get_serializer(instance=auth)
+        return Response(ser.data)
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path='request-2fa-otp',
+        permission_classes=[IsAuthenticated],
+        authentication_classes=(IncompleteLoginAuthentication,)
+    )
+    def request_2fa_otp(self, request, *args, **kwargs):
+        user: Authentication = request.user
+        generate_and_send_2fa_otp.delay(str(user.id))
+        return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["POST"],
+        url_path='complete-login',
+        permission_classes=[IsAuthenticated],
+        authentication_classes=(IncompleteLoginAuthentication,),
+        serializer_class=CompleteLoginSerializer
+    )
+    def complete_login(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data, instance=request.user.authentication)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data, status=status.HTTP_200_OK)

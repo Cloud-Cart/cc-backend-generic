@@ -1,28 +1,19 @@
+from datetime import timedelta
+from multiprocessing import AuthenticationError
+
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField
 from rest_framework.serializers import ModelSerializer, Serializer, IntegerField
 
-from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication
+from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions
 from Users.models import User
 
 
 class RegisterSerializer(ModelSerializer):
     confirm_password = CharField(write_only=True)
     password = CharField(write_only=True, )
-
-    def validate(self, attrs):
-        confirm_password = attrs.pop('confirm_password')
-        password = attrs.get('password')
-        if password != confirm_password:
-            raise ValidationError(_('Passwords not match.'))
-        return attrs
-
-    def save(self):
-        password = self.validated_data.pop('password')
-        email = self.validated_data.get('email')
-        self.instance = User.objects.create_user(email=email, password=password, is_active=False)
-        return self.instance
 
     class Meta:
         model = User
@@ -38,6 +29,19 @@ class RegisterSerializer(ModelSerializer):
                 'min_length': 8,
             }
         }
+
+    def validate(self, attrs):
+        confirm_password = attrs.pop('confirm_password')
+        password = attrs.get('password')
+        if password != confirm_password:
+            raise ValidationError(_('Passwords not match.'))
+        return attrs
+
+    def save(self):
+        password = self.validated_data.pop('password')
+        email = self.validated_data.get('email')
+        self.instance = User.objects.create_user(email=email, password=password, is_active=False)
+        return self.instance
 
 
 class VerifyOTPSerializer(Serializer):
@@ -94,3 +98,121 @@ class AuthenticatorAppSerializer(ModelSerializer):
         if self.context.get('creating'):
             data['secret'] = instance.secret
         return data
+
+
+class LoginSerializer(ModelSerializer):
+    incomplete_session = None
+    tokens = None
+
+    class Meta:
+        model = Authentication
+        fields = [
+            'email',
+            'password'
+        ]
+        extra_kwargs = {
+            'password': {'required': True},
+            'email': {'write_only': True, 'required': True},
+        }
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        password = attrs.get('password')
+
+        try:
+            auth = Authentication.objects.get(email=email)
+        except Authentication.DoesNotExist:
+            raise AuthenticationError(_('User does not exist.'))
+        if not auth.check_password(password):
+            raise AuthenticationError(_('Incorrect password.'))
+        self.instance = auth
+        return attrs
+
+    def save(self):
+        if self.instance.is_2fa_enabled:
+            IncompleteLoginSessions.objects.filter(auth=self.instance).delete()
+            self.incomplete_session = IncompleteLoginSessions.objects.create(auth=self.instance)
+        else:
+            self.tokens = self.instance.auth_tokens
+            self.instance.user.last_login = timezone.now()
+            self.instance.user.save()
+        return self.instance
+
+    def to_representation(self, instance):
+        if instance.is_2fa_enabled:
+            return {
+                'session_id': self.incomplete_session.id
+            }
+        return self.tokens
+
+
+class TwoFactorSettingsSerializer(ModelSerializer):
+    apps = AuthenticatorAppSerializer(many=True, read_only=True, source='hotp_authentications')
+
+    class Meta:
+        model = Authentication
+        fields = [
+            'is_2fa_enabled',
+            'otp_2fa_enabled',
+            'apps'
+        ]
+        extra_kwargs = {
+            'is_2fa_enabled': {
+                'read_only': True,
+            },
+            'otp_2fa_enabled': {
+                'read_only': True,
+            }
+        }
+
+class CompleteLoginSerializer(Serializer):
+    email_otp = CharField(write_only=True, required=False)
+    authenticator_otp = CharField(write_only=True, required=False)
+
+    def validate(self, attrs):
+        if not self.instance:
+            raise AssertionError('Pass instance to validate CompleteLoginSerializer.')
+
+        email_otp: str = attrs.get('email_otp')
+        authenticator_otp: str = attrs.get('authenticator_otp')
+        auth: Authentication = self.instance
+
+        if not auth.is_2fa_enabled:
+            raise ValidationError(_('2 Step Verification not enabled.'))
+
+        if email_otp and authenticator_otp:
+            raise ValidationError(_('OTP verification failed. Use any one of the method.'))
+
+        if not (email_otp or authenticator_otp):
+            raise ValidationError({'email_otp': _('This field is required.')})
+
+        if email_otp:
+            if not auth.otp_2fa_enabled:
+                raise ValidationError(_('OTP Verification failed. Use any of the available method'))
+            try:
+                otp_auth = OTPAuthentication.objects.get(authentication_id=auth.id)
+                if not otp_auth.verify_otp(email_otp):
+                    raise ValidationError(_('OTP verification failed.'))
+            except OTPAuthentication.DoesNotExist:
+                raise ValidationError(_('OTP verification failed.'))
+        else:
+            if not auth.hotp_authentications.filter(is_active=True).exists():
+                raise ValidationError(_('OTP verification failed. Use any of the available method.'))
+            if not self.verify_authenticator_app(authenticator_otp):
+                raise ValidationError(_('OTP verification failed. Invalid OTP'))
+        return attrs
+
+    def verify_authenticator_app(self, otp):
+        auth: Authentication = self.instance
+        for app in auth.hotp_authentications.filter(is_active=True):
+            if app.verify_otp(otp, window=1):
+                app.last_used = timezone.now()
+                app.save()
+                return True
+        return False
+
+    def save(self, **kwargs):
+        IncompleteLoginSessions.objects.filter(auth=self.instance).delete()
+
+    def to_representation(self, instance: Authentication):
+        return instance.auth_tokens
