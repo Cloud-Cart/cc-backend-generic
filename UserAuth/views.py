@@ -1,17 +1,18 @@
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from UserAuth.authentications import IncompleteLoginAuthentication
-from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication
+from UserAuth.choices import OTPPurpose
+from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode
 from UserAuth.permissions import IsOwnAuthenticator
 from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
-    TwoFactorSettingsSerializer, CompleteLoginSerializer
+    TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer
 from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
-    generate_and_send_2fa_otp
+    send_2fa_otp, send_recovered_email_notification
 from Users.models import User
 
 
@@ -70,9 +71,12 @@ class AuthenticationViewSet(GenericViewSet):
         detail=False
     )
     def create_hotp_authentication(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data, context={'creating': True})
-        serializer.is_valid(raise_exception=True)
         user: User = request.user
+        serializer = self.get_serializer(
+            data=request.data,
+            context={'creating': True, 'auth_id': user.authentication.id}
+        )
+        serializer.is_valid(raise_exception=True)
         serializer.save(authentication=user.authentication)
         return Response(data=serializer.data, status=status.HTTP_201_CREATED)
 
@@ -120,7 +124,7 @@ class AuthenticationViewSet(GenericViewSet):
                 {
                     'error': 'Email not verified to enable OTP authentication',
                 },
-                status=status.HTTP_409_CONFLICT
+                status=status.HTTP_403_FORBIDDEN
             )
 
         auth.otp_2fa_enabled = True
@@ -213,8 +217,9 @@ class AuthenticationViewSet(GenericViewSet):
         authentication_classes=(IncompleteLoginAuthentication,)
     )
     def request_2fa_otp(self, request, *args, **kwargs):
-        user: Authentication = request.user
-        generate_and_send_2fa_otp.delay(str(user.id))
+        user: User = request.user
+        otp = OTPAuthentication.generate_otp(user.authentication, OTPPurpose.SECOND_STEP_VERIFICATION)
+        send_2fa_otp.delay(str(user.id), otp)
         return Response(data={}, status=status.HTTP_200_OK)
 
     @action(
@@ -229,4 +234,48 @@ class AuthenticationViewSet(GenericViewSet):
         ser = self.get_serializer(data=request.data, instance=request.user.authentication)
         ser.is_valid(raise_exception=True)
         ser.save()
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["POST"],
+        url_path="recover-account",
+        permission_classes=[AllowAny],
+        serializer_class=RecoverAccountSerializer
+    )
+    def recover_account(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        auth: Authentication = ser.save()
+        send_recovered_email_notification.delay(str(auth.user_id))
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='get-recovery-codes',
+        permission_classes=[IsAuthenticated],
+        serializer_class=RecoveryCodeSerializer
+    )
+    def get_recovery_codes(self, request, *args, **kwargs):
+        recovery_codes = self.request.user.authentication.recovery_codes.all()
+        ser = self.get_serializer(recovery_codes, many=True)
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=['PUT'],
+        url_path='reset-recovery-codes',
+        permission_classes=[IsAuthenticated],
+        serializer_class=RecoveryCodeSerializer
+    )
+    def reset_recovery_codes(self, request, *args, **kwargs):
+        auth: Authentication = request.user.authentication
+        recovery_codes = auth.recovery_codes.all()
+        recovery_codes.delete()
+        recovery_codes = [
+            RecoveryCode.objects.create(authentication=auth)
+            for _ in range(10)
+        ]
+        ser = self.get_serializer(recovery_codes, many=True)
         return Response(ser.data, status=status.HTTP_200_OK)

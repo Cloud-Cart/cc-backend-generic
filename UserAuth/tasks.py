@@ -19,9 +19,8 @@ def generate_and_send_verification_otp(user_id: UUID):
     )
 
 @app.task
-def generate_and_send_2fa_otp(user_id: UUID):
+def send_2fa_otp(user_id: UUID, otp: str):
     user = User.objects.get(pk=user_id)
-    otp = OTPAuthentication.generate_otp(user.authentication, OTPPurpose.SECOND_STEP_VERIFICATION)
     user.email_user(
         subject=f"Your OTP is {otp}",
         message=f"Your OTP is {otp}",
@@ -45,4 +44,12 @@ def send_logined_email_notification(user_id: UUID):
     user.email_user(
         subject=f"Your Login Email Notification for {str(user)}",
         message=f"Your Login Email Notification for {str(user)}",
+    )
+
+@app.task
+def send_recovered_email_notification(user_id: UUID):
+    user: User = User.objects.get(pk=user_id)
+    user.email_user(
+        subject=f"Your Recovery Email Notification for {str(user)}",
+        message=f"Your Recovery Email Notification for {str(user)}",
     )

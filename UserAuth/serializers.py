@@ -1,13 +1,10 @@
-from datetime import timedelta
-from multiprocessing import AuthenticationError
-
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField
-from rest_framework.serializers import ModelSerializer, Serializer, IntegerField
+from rest_framework.serializers import ModelSerializer, Serializer
 
-from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions
+from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions, RecoveryCode
 from Users.models import User
 
 
@@ -45,7 +42,7 @@ class RegisterSerializer(ModelSerializer):
 
 
 class VerifyOTPSerializer(Serializer):
-    otp = IntegerField(write_only=True)
+    otp = CharField(write_only=True)
 
     def validate_otp(self, value):
         if not self.instance:
@@ -76,6 +73,9 @@ class VerifyOTPSerializer(Serializer):
             'otp'
         ]
 
+    def to_representation(self, instance):
+        return AuthenticatorAppSerializer(instance).data
+
 
 class AuthenticatorAppSerializer(ModelSerializer):
     class Meta:
@@ -92,6 +92,13 @@ class AuthenticatorAppSerializer(ModelSerializer):
             'created_at': {'read_only': True},
             'authentication_id': {'read_only': True},
         }
+
+    def validate_name(self, value):
+        auth_id = self.context.get('auth_id', None)
+        if auth_id is not None:
+            if self.Meta.model.objects.filter(authentication_id=auth_id, name=value).exists():
+                raise ValidationError(_('You already used this name.'))
+        return value
 
     def to_representation(self, instance: HOTPAuthentication):
         data = super().to_representation(instance)
@@ -122,9 +129,11 @@ class LoginSerializer(ModelSerializer):
         try:
             auth = Authentication.objects.get(email=email)
         except Authentication.DoesNotExist:
-            raise AuthenticationError(_('User does not exist.'))
+            raise ValidationError(_('User does not exist.'))
+        if not (auth.email_verified and auth.user.is_active):
+            raise ValidationError(_('Email verification failed.'))
         if not auth.check_password(password):
-            raise AuthenticationError(_('Incorrect password.'))
+            raise ValidationError(_('Incorrect password.'))
         self.instance = auth
         return attrs
 
@@ -164,6 +173,7 @@ class TwoFactorSettingsSerializer(ModelSerializer):
                 'read_only': True,
             }
         }
+
 
 class CompleteLoginSerializer(Serializer):
     email_otp = CharField(write_only=True, required=False)
@@ -216,3 +226,69 @@ class CompleteLoginSerializer(Serializer):
 
     def to_representation(self, instance: Authentication):
         return instance.auth_tokens
+
+
+class RecoverAccountSerializer(Serializer):
+    email = CharField(write_only=True, required=True)
+    recovery_code = CharField(write_only=True, required=True)
+    password = CharField(write_only=True, required=True)
+    confirm_password = CharField(write_only=True, required=True)
+    recovery_obj = None
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        recovery_code = attrs.get('recovery_code')
+        password = attrs.get('password')
+        confirm_password = attrs.get('confirm_password')
+        errors = {}
+        if password != confirm_password:
+            errors['confirm_password'] = _('Passwords do not match.')
+
+        try:
+            self.instance = Authentication.objects.get(email=email)
+        except Authentication.DoesNotExist:
+            errors['email'] = _('User does not exist.')
+            raise ValidationError(errors)
+        try:
+            self.recovery_obj = RecoveryCode.objects.get(
+                authentication=self.instance,
+                code=recovery_code,
+                is_used=False,
+            )
+        except RecoveryCode.DoesNotExist:
+            errors['recovery_code'] = _('Recovery code does not exist.')
+            raise ValidationError(errors)
+        if len(errors.keys()) > 0:
+            raise ValidationError(errors)
+        return attrs
+
+    def save(self, **kwargs):
+        password = self.validated_data.get('password')
+        self.instance.set_password(password)
+        self.instance.save()
+        self.recovery_obj.is_used = True
+        self.recovery_obj.save()
+        self.instance.is_2fa_enabled = False
+        self.instance.save()
+        return self.instance
+
+    def to_representation(self, instance):
+        return instance.auth_tokens
+
+class RecoveryCodeSerializer(ModelSerializer):
+    class Meta:
+        model = RecoveryCode
+        fields = (
+            'code',
+            'is_used',
+        )
+        kwargs = {
+            'code': {
+                'read_only': True,
+            },
+            'is_used': {
+                'read_only': True,
+            }
+        }
+
+

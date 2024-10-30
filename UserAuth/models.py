@@ -161,6 +161,7 @@ class HOTPAuthentication(Model):
         indexes = [
             Index(fields=['authentication']),
         ]
+        unique_together = (('authentication', 'name',),)
 
     def __str__(self):
         return f"{self.name} of {self.authentication}"
