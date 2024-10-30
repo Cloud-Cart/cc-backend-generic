@@ -10,7 +10,8 @@ from UserAuth.choices import OTPPurpose
 from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode
 from UserAuth.permissions import IsOwnAuthenticator
 from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
-    TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer
+    TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer, \
+    UpdatePasswordSerializer
 from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
     send_2fa_otp, send_recovered_email_notification
 from Users.models import User
@@ -278,4 +279,17 @@ class AuthenticationViewSet(GenericViewSet):
             for _ in range(10)
         ]
         ser = self.get_serializer(recovery_codes, many=True)
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=['PUT'],
+        url_path='update-password',
+        permission_classes=[IsAuthenticated],
+        serializer_class=UpdatePasswordSerializer
+    )
+    def update_password(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data, instance=request.user.authentication)
+        ser.is_valid(raise_exception=True)
+        ser.save()
         return Response(ser.data, status=status.HTTP_200_OK)

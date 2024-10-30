@@ -275,6 +275,7 @@ class RecoverAccountSerializer(Serializer):
     def to_representation(self, instance):
         return instance.auth_tokens
 
+
 class RecoveryCodeSerializer(ModelSerializer):
     class Meta:
         model = RecoveryCode
@@ -292,3 +293,29 @@ class RecoveryCodeSerializer(ModelSerializer):
         }
 
 
+class UpdatePasswordSerializer(Serializer):
+    password = CharField(required=True, write_only=True)
+    new_password = CharField(required=True, write_only=True)
+    confirm_password = CharField(required=True, write_only=True)
+
+    def validate(self, attrs):
+        password = attrs.get('password')
+        new_password = attrs.get('new_password')
+        confirm_password = attrs.get('confirm_password')
+
+        errors = {}
+        if self.instance is None:
+            raise AssertionError('Can\'t update password without instance.')
+        if not self.instance.check_password(password):
+            errors['password'] = _('Password does not valid.')
+        if new_password != confirm_password:
+            errors['confirm_password'] = _('Passwords do not match.')
+
+        if errors:
+            raise ValidationError(errors)
+        return attrs
+
+    def save(self, **kwargs):
+        self.instance.set_password(self.validated_data.get('new_password'))
+        self.instance.save()
+        return self.instance

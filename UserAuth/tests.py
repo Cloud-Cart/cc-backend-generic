@@ -887,3 +887,68 @@ class TestResetRecoveryCodes(APITestCase, TenantTestCase):
             ),
             'All codes should be reset'
         )
+
+
+class TestPasswordUpdate(APITestCase, TenantTestCase):
+    def setUp(self):
+        self.client = TenantAPIClient(self.tenant)
+        self.url = reverse('auth-update-password', ('v1',))
+
+    def test_success(self):
+        password = 'password'
+        user = User.objects.create_user(
+            email='test@test.com',
+            password=password,
+        )
+        self.client.force_authenticate(user)
+        auth = user.authentication
+        new_password = 'password1'
+        data = {
+            'password': password,
+            'new_password': new_password,
+            'confirm_password': new_password
+        }
+        response = self.client.put(
+            path=self.url,
+            data=data
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, 'Response should be 200')
+        auth.refresh_from_db()
+        self.assertTrue(auth.check_password(new_password), 'Password should update successfully')
+
+    def test_current_password_not_match(self):
+        user = User.objects.create_user(
+            email='test@test.com',
+            password='<PASSWORD>',
+        )
+        self.client.force_authenticate(user)
+        auth = user.authentication
+        data = {
+            'password': 'wrong_password',
+            'new_password': 'password1',
+            'confirm_password': 'password1'
+        }
+        response = self.client.put(
+            path=self.url,
+            data=data
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, 'Response should be 400')
+        auth.refresh_from_db()
+        self.assertFalse(auth.check_password(data['new_password']), 'Password should not update')
+
+    def test_new_password_not_match(self):
+        user = User.objects.create_user(
+            email='test@test.com',
+            password='<PASSWORD>',
+        )
+        self.client.force_authenticate(user)
+        data = {
+            'password': '<PASSWORD>',
+            'new_password': 'password1',
+            'confirm_password': 'password2'
+        }
+        response = self.client.put(
+            path=self.url,
+            data=data
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, 'Response should be 400')
