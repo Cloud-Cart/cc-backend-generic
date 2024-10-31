@@ -41,6 +41,7 @@ SHARED_APPS = (
     'django.contrib.sessions',
     'django.contrib.admin',
     'Users.apps.UsersConfig',
+    'UserAuth.apps.UserauthConfig',
 )
 
 TENANT_APPS = (
@@ -50,6 +51,7 @@ TENANT_APPS = (
     'django.contrib.admin',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'UserAuth.apps.UserauthConfig',
 )
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
@@ -181,3 +183,4 @@ EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=True)
 EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=None)
 EMAIL_SSL_KEYFILE = env.str('EMAIL_SSL_KEYFILE', default=None)
 EMAIL_SSL_CERTFILE = env.str('EMAIL_SSL_CERTFILE', default=None)
+DEFAULT_FROM_EMAIL = env.str('DEFAULT_FROM_EMAIL', None)

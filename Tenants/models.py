@@ -8,7 +8,7 @@ from django_tenants.models import TenantMixin, DomainMixin
 class Tenant(TenantMixin):
     id = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant_name = CharField(max_length=255)
-    owner = ForeignKey('Users.User', on_delete=CASCADE)
+    owner = ForeignKey('Users.User', on_delete=CASCADE, blank=False, null=True)
     auto_create_schema = True
 
     class Meta:
