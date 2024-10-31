@@ -25,6 +25,7 @@ class User(AbstractUser):
     ]
     username = None
     password = None
+    _save_auth = False
     objects = UserManager()
 
     class Meta:
@@ -33,7 +34,9 @@ class User(AbstractUser):
         verbose_name_plural = 'Users'
 
     def set_password(self, raw_password):
-        return self.authentication.set_password(raw_password)
+        r = self.authentication.set_password(raw_password)
+        self._save_auth = True
+        return r
 
     def check_password(self, raw_password):
         return self.authentication.check_password(raw_password)
@@ -42,7 +45,16 @@ class User(AbstractUser):
         return await self.authentication.acheck_password(raw_password)
 
     def set_unusable_password(self):
-        return self.authentication.set_unusable_password()
+        r = self.authentication.set_unusable_password()
+        self._save_auth = True
+        return r
 
     def has_usable_password(self):
         return self.authentication.has_usable_password()
+
+    def save(self, *args, **kwargs):
+        r = super().save(*args, **kwargs)
+        if self._save_auth:
+            self.authentication.save()
+            self._save_auth = False
+        return r
