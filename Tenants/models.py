@@ -3,12 +3,15 @@ import uuid
 from django.db.models import UUIDField, CharField, ForeignKey, CASCADE
 from django.utils.translation import gettext_lazy as _
 from django_tenants.models import TenantMixin, DomainMixin
+from django_tenants.utils import get_tenant_type_choices
 
 
 class Tenant(TenantMixin):
     id = UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant_name = CharField(max_length=255)
     owner = ForeignKey('Users.User', on_delete=CASCADE, blank=False, null=True)
+    type = CharField(max_length=100, choices=get_tenant_type_choices())
+
     auto_create_schema = True
 
     class Meta:

@@ -30,31 +30,44 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
 # Application definition
 
-SHARED_APPS = (
-    'django_tenants',
-    'Tenants',
-    'django.contrib.messages',
-    'django.contrib.contenttypes',
-    'django.contrib.sites',
-    'django.contrib.staticfiles',
-    'django.contrib.auth',
-    'django.contrib.sessions',
-    'django.contrib.admin',
-    'Users.apps.UsersConfig',
-    'UserAuth.apps.UserauthConfig',
-)
+HAS_MULTI_TYPE_TENANTS = True
+MULTI_TYPE_DATABASE_FIELD = 'type'
+SHOW_PUBLIC_IF_NO_TENANT_FOUND = True
 
-TENANT_APPS = (
-    'Users.apps.UsersConfig',
-    'django.contrib.contenttypes',
-    'django.contrib.auth',
-    'django.contrib.admin',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'UserAuth.apps.UserauthConfig',
-)
+TENANT_TYPES = {
+    "public": {
+        "APPS": [
+            'django_tenants',
+            'Tenants',
+            'django.contrib.messages',
+            'django.contrib.contenttypes',
+            'django.contrib.sites',
+            'django.contrib.staticfiles',
+            'django.contrib.auth',
+            'django.contrib.sessions',
+            'django.contrib.admin',
+            'Users.apps.UsersConfig',
+            'UserAuth.apps.UserauthConfig',
+        ],
+        "URLCONF": "CloudCart.urls_public",  # url for the public type here
+    },
+    "stores": {
+        "APPS": [
+            'Users.apps.UsersConfig',
+            'django.contrib.contenttypes',
+            'django.contrib.auth',
+            'django.contrib.admin',
+            'django.contrib.sessions',
+            'django.contrib.messages',
+            'UserAuth.apps.UserauthConfig',
+        ],
+        "URLCONF": "CloudCart.urls_stores",
+    },
+}
 
-INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
+INSTALLED_APPS = []
+for schema in TENANT_TYPES:
+    INSTALLED_APPS += [app for app in TENANT_TYPES[schema]["APPS"] if app not in INSTALLED_APPS]
 
 MIDDLEWARE = [
     'django_tenants.middleware.main.TenantMainMiddleware',
@@ -67,7 +80,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'CloudCart.urls'
+ROOT_URLCONF = 'CloudCart.urls_public'
 
 TEMPLATES = [
     {
