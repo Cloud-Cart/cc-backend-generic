@@ -24,7 +24,7 @@ urlpatterns = [
         include('UserAuth.urls'),
     ),
     re_path(
-        r'^(?P<version>(v1))/users/',
+        r'^(?P<version>(v1))/users',
         include('Users.urls'),
     ),
 ]

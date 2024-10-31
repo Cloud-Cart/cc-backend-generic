@@ -1,5 +1,4 @@
 from django_tenants.test.cases import TenantTestCase
-from django_tenants.test.client import TenantClient
 from rest_framework import status
 from rest_framework.reverse import reverse
 from rest_framework.test import APITestCase
@@ -15,7 +14,7 @@ class TestRegistration(APITestCase, TenantTestCase):
     def setUp(self):
         super().setUp()
         self.url = reverse('auth-register', ('v1',))
-        self.client = TenantClient(self.tenant)
+        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         data = {
@@ -66,7 +65,7 @@ class TestRegistration(APITestCase, TenantTestCase):
 class TestOTPVerification(APITestCase, TenantTestCase):
     def setUp(self):
         super().setUp()
-        self.client = TenantClient(self.tenant)
+        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         user = User.objects.create_user(
@@ -130,7 +129,7 @@ class TestLogin(APITestCase, TenantTestCase):
     def setUp(self):
         super().setUp()
         self.url = reverse('auth-login', ('v1',))
-        self.client = TenantClient(self.tenant)
+        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         user = User.objects.create_user(
