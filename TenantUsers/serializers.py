@@ -1,15 +1,16 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, EmailField, ChoiceField, UUIDField
+from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import Serializer
 
 from CloudCart.celery import app
-from TenantUsers.choices import TenantUserRoles
+from TenantUsers.choices import TenantUserRoles, InvitationStatus
 from TenantUsers.models import TenantUser
 from Users.models import User
 
 
-class InviteUserSerializer(Serializer):
+class TenantUserSerializer(Serializer):
     id = UUIDField(read_only=True)
     first_name = CharField(source='user.first_name')
     last_name = CharField(source='user.last_name')
@@ -37,3 +38,14 @@ class InviteUserSerializer(Serializer):
         )
         app.send_task('invite_tenant_user', args=[str(tenant_user.id)])
         return tenant_user
+
+
+class TenantUserAcceptSerializer(Serializer):
+    tenant_user = PrimaryKeyRelatedField()
+
+
+    @staticmethod
+    def validate_tenant_user(value: TenantUser):
+        if value.invitation_status in [InvitationStatus.SEND, InvitationStatus.RESEND]:
+            raise ValidationError(_('Tenant user already accepted.'))
+        return value
