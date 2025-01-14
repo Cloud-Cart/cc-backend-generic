@@ -6,7 +6,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from TenantUsers.models import TenantUser
 from TenantUsers.permissions import CanInviteUser
-from TenantUsers.serializers import TenantUserSerializer
+from TenantUsers.serializers import TenantUserSerializer, TenantUserInviteAcceptSerializer
 
 
 class TenantUsersViewSet(GenericViewSet):
@@ -14,14 +14,14 @@ class TenantUsersViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
     serializer_class = TenantUserSerializer
 
-    @action(detail=False, methods=['GET'], url_path='', url_name='get-self')
+    @action(detail=False, methods=['GET'], url_path='/self', url_name='get-self')
     def get_self(self, request, *args, **kwargs):
         tenant_user = request.user.tenant_user
         ser = TenantUserSerializer(tenant_user)
         return Response(ser.data)
 
     @action(
-        url_path='invite',
+        url_path='/invite',
         detail=False,
         methods=('POST',),
         url_name='invite-user',
@@ -39,6 +39,10 @@ class TenantUsersViewSet(GenericViewSet):
         methods=('POST',),
         url_name='accept-invite',
         permission_classes=(AllowAny,),
+        serializer_class=TenantUserInviteAcceptSerializer
     )
     def accept_invite(self, request, *args, **kwargs):
-        pass
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data, status=status.HTTP_201_CREATED)

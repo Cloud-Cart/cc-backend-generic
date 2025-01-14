@@ -9,4 +9,8 @@ urlpatterns = [
         r'^(?P<version>(v1))/users',
         include('Users.urls'),
     ),
+    re_path(
+        r'^(?P<version>(v1))/store-users',
+        include('TenantUsers.urls'),
+    )
 ]

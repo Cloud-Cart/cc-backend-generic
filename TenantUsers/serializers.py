@@ -6,7 +6,7 @@ from rest_framework.serializers import Serializer
 
 from CloudCart.celery import app
 from TenantUsers.choices import TenantUserRoles, InvitationStatus
-from TenantUsers.models import TenantUser
+from TenantUsers.models import TenantUser, TenantUserInvitation
 from Users.models import User
 
 
@@ -30,22 +30,59 @@ class TenantUserSerializer(Serializer):
             **user_data,
             is_active=False
         )
-        inviting_user = self.context.get('user')
+        inviting_user: User = self.context.get('user')
         tenant_user = TenantUser.objects.create(
             user=user,
             role=role,
-            invited_by=inviting_user,
         )
-        app.send_task('invite_tenant_user', args=[str(tenant_user.id)])
+        invitation = TenantUserInvitation.objects.create(
+            invited_by=inviting_user.tenant_user,
+            invitation_status=InvitationStatus.PENDING,
+            user=tenant_user,
+        )
+        app.send_task('invite_tenant_user', args=[str(invitation.id)])
         return tenant_user
 
 
-class TenantUserAcceptSerializer(Serializer):
-    tenant_user = PrimaryKeyRelatedField()
+class TenantUserInviteAcceptSerializer(Serializer):
+    tenant_user = PrimaryKeyRelatedField(queryset=TenantUser.objects.filter(
+        invitation__invitation_status__in=[InvitationStatus.SEND, InvitationStatus.RESEND]
+    ))
+    secret = CharField(write_only=True)
+    password = CharField(write_only=True)
+    confirm_password = CharField(write_only=True)
 
+    def validate(self, attrs):
+        errors = {}
+        tenant_user = attrs.pop('tenant_user')
+        secret = attrs.pop('secret')
+        password = attrs.pop('password')
+        confirm_password = attrs.pop('confirm_password')
+        invitation = None
+        try:
+            invitation = TenantUserInvitation.objects.get(user=tenant_user)
+            if not invitation.verify_secret(secret):
+                errors['secret'] = _('Incorrect secret.')
+        except TenantUserInvitation.DoesNotExist:
+            errors['tenant_user'] = _('Invitation can\'t be found.')
+        if password != confirm_password:
+            errors['confirm_password'] = _('Passwords do not match.')
+        if errors:
+            raise ValidationError(errors)
+        self.instance = invitation
+        return attrs
 
-    @staticmethod
-    def validate_tenant_user(value: TenantUser):
-        if value.invitation_status in [InvitationStatus.SEND, InvitationStatus.RESEND]:
-            raise ValidationError(_('Tenant user already accepted.'))
-        return value
+    def save(self):
+        password = self.validated_data.pop('password')
+
+        invitation = self.instance
+        invitation.secret_hash = None
+        invitation.invitation_status = InvitationStatus.ACCEPTED
+        invitation.save()
+        user = invitation.user.user
+        user.is_active = True
+        user.save()
+        auth = user.authentication
+        auth.set_password(password)
+        auth.save()
+        return invitation

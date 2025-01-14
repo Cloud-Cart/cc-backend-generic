@@ -12,6 +12,7 @@ class TenantUserRoles(TextChoices):
 
 
 class InvitationStatus(TextChoices):
+    PENDING = 'pending', _('Pending')
     SEND = 'send', _('Send')
     ACCEPTED = 'accepted', _('Accepted')
     REJECTED = 'rejected', _('Rejected')

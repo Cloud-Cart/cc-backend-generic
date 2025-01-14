@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from django.contrib.auth.hashers import make_password, check_password
 from django.db.models import Model, OneToOneField, CASCADE, UUIDField, CharField, ForeignKey
 from django.utils.translation import gettext_lazy as _
 
@@ -39,8 +40,18 @@ class TenantUserInvitation(Model):
         on_delete=CASCADE,
         related_name='invitation',
     )
+    secret_hash = CharField(max_length=128, null=True)
 
     class Meta:
         verbose_name = _('Tenant User invitation')
         verbose_name_plural = _('Tenant User invitations')
         db_table = 'tenant_user_invitation'
+
+    def generate_hash(self):
+        secret = uuid4()
+        self.secret_hash = make_password(str(secret))
+        self.save()
+        return secret
+
+    def verify_secret(self, secret):
+        return check_password(str(secret), self.secret_hash)
