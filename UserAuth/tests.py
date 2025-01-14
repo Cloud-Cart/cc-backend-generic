@@ -1,20 +1,19 @@
-from django_tenants.test.cases import TenantTestCase
 from rest_framework import status
 from rest_framework.reverse import reverse
-from rest_framework.test import APITestCase
 
-from CloudCart.tests import TenantAPIClient
+from CloudCart.tests import TenantAPIClient, TenantAPITestCase
 from UserAuth.choices import OTPPurpose
 from UserAuth.models import OTPAuthentication, HOTPAuthentication, IncompleteLoginSessions
 from UserAuth.utils import generate_recovery_codes
 from Users.models import User
 
 
-class TestRegistration(APITestCase, TenantTestCase):
+class TestRegistration(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
         super().setUp()
         self.url = reverse('auth-register', ('v1',))
-        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         data = {
@@ -62,10 +61,8 @@ class TestRegistration(APITestCase, TenantTestCase):
         self.assertEqual(User.objects.count(), 1)
 
 
-class TestOTPVerification(APITestCase, TenantTestCase):
-    def setUp(self):
-        super().setUp()
-        self.client = TenantAPIClient(self.tenant)
+class TestOTPVerification(TenantAPITestCase):
+    tenant_type = 'public'
 
     def test_success(self):
         user = User.objects.create_user(
@@ -125,11 +122,12 @@ class TestOTPVerification(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, "Response should be 404")
 
 
-class TestLogin(APITestCase, TenantTestCase):
+class TestLogin(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
         super().setUp()
         self.url = reverse('auth-login', ('v1',))
-        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         user = User.objects.create_user(
@@ -229,10 +227,12 @@ class TestLogin(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, "Response should be 400")
 
 
-class TestCreateHotp(APITestCase, TenantTestCase):
+class TestCreateHotp(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
+        super().setUp()
         self.url = reverse('auth-create-hotp-authentication', ('v1',))
-        self.client = TenantAPIClient(self.tenant)
 
     def test_success(self):
         user = User.objects.create_user(
@@ -295,9 +295,8 @@ class TestCreateHotp(APITestCase, TenantTestCase):
         self.assertIn('name', response_data, "Response should error for \'name\'")
 
 
-class TestActivateHotp(APITestCase, TenantTestCase):
-    def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+class TestActivateHotp(TenantAPITestCase):
+    tenant_type = 'public'
 
     def test_success(self):
         user = User.objects.create_user(
@@ -386,9 +385,11 @@ class TestActivateHotp(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT, "Response should be 409")
 
 
-class TestEnableOTPAuthentication(APITestCase, TenantTestCase):
+class TestEnableOTPAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-enable-otp-authentication', ('v1',))
 
     def test_success(self):
@@ -435,9 +436,11 @@ class TestEnableOTPAuthentication(APITestCase, TenantTestCase):
         self.assertTrue(auth.otp_2fa_enabled, 'OTP verification should be enabled')
 
 
-class TestDisableOTPAuthentication(APITestCase, TenantTestCase):
+class TestDisableOTPAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-disable-otp-authentication', ('v1',))
 
     def test_success(self):
@@ -468,9 +471,11 @@ class TestDisableOTPAuthentication(APITestCase, TenantTestCase):
         self.assertFalse(auth.otp_2fa_enabled, 'OTP verification should be disabled')
 
 
-class TestEnable2FAAuthentication(APITestCase, TenantTestCase):
+class TestEnable2FAAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-enable-2fa-authentication', ('v1',))
 
     def test_success_with_otp(self):
@@ -524,9 +529,11 @@ class TestEnable2FAAuthentication(APITestCase, TenantTestCase):
         self.assertFalse(auth.is_2fa_enabled, '2fa verification should be enabled')
 
 
-class TestDisable2FAAuthentication(APITestCase, TenantTestCase):
+class TestDisable2FAAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-disable-2fa-authentication', ('v1',))
 
     def test_success(self):
@@ -563,9 +570,11 @@ class TestDisable2FAAuthentication(APITestCase, TenantTestCase):
         self.assertFalse(auth.is_2fa_enabled, '2fa verification should be disabled')
 
 
-class TestGet2FAAuthentication(APITestCase, TenantTestCase):
+class TestGet2FAAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-get-2fa-settings', ('v1',))
 
     def test_success(self):
@@ -578,9 +587,11 @@ class TestGet2FAAuthentication(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, 'Response should be 200')
 
 
-class TestRequest2FAAuthentication(APITestCase, TenantTestCase):
+class TestRequest2FAAuthentication(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-request-2fa-otp', ('v1',))
 
     def test_success(self):
@@ -597,9 +608,11 @@ class TestRequest2FAAuthentication(APITestCase, TenantTestCase):
         self.assertEqual(otp.otp_purpose, OTPPurpose.SECOND_STEP_VERIFICATION)
 
 
-class TestTwoSetupLoginProcess(APITestCase, TenantTestCase):
+class TestTwoSetupLoginProcess(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.login_url = reverse('auth-login', ('v1',))
         self.request_otp_url = reverse('auth-request-2fa-otp', ('v1',))
         self.complete_login_url = reverse('auth-complete-login', ('v1',))
@@ -725,9 +738,11 @@ class TestTwoSetupLoginProcess(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, 'Response should be 400')
 
 
-class TestRecoveryAccount(APITestCase, TenantTestCase):
+class TestRecoveryAccount(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-recover-account', ('v1',))
 
     def test_recover_account_success(self):
@@ -834,9 +849,11 @@ class TestRecoveryAccount(APITestCase, TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, 'Response should be 400')
 
 
-class TestGetRecoveryCodes(APITestCase, TenantTestCase):
+class TestGetRecoveryCodes(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-get-recovery-codes', ('v1',))
 
     def test_get_recovery_codes_success(self):
@@ -858,9 +875,11 @@ class TestGetRecoveryCodes(APITestCase, TenantTestCase):
         )
 
 
-class TestResetRecoveryCodes(APITestCase, TenantTestCase):
+class TestResetRecoveryCodes(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-reset-recovery-codes', ('v1',))
 
     def test_reset_recovery_codes_success(self):
@@ -888,9 +907,11 @@ class TestResetRecoveryCodes(APITestCase, TenantTestCase):
         )
 
 
-class TestPasswordUpdate(APITestCase, TenantTestCase):
+class TestPasswordUpdate(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('auth-update-password', ('v1',))
 
     def test_success(self):

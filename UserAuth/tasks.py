@@ -18,6 +18,7 @@ def generate_and_send_verification_otp(user_id: UUID):
         from_email=settings.DEFAULT_FROM_EMAIL,
     )
 
+
 @app.task
 def send_2fa_otp(user_id: UUID, otp: str):
     user = User.objects.get(pk=user_id)
@@ -38,6 +39,7 @@ def send_new_authentication_app_created_email(user_id: UUID, authenticator_id: U
         from_email=settings.DEFAULT_FROM_EMAIL,
     )
 
+
 @app.task
 def send_logined_email_notification(user_id: UUID):
     user: User = User.objects.get(pk=user_id)
@@ -45,6 +47,7 @@ def send_logined_email_notification(user_id: UUID):
         subject=f"Your Login Email Notification for {str(user)}",
         message=f"Your Login Email Notification for {str(user)}",
     )
+
 
 @app.task
 def send_recovered_email_notification(user_id: UUID):

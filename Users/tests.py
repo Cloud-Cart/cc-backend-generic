@@ -1,15 +1,15 @@
-from django_tenants.test.cases import TenantTestCase
 from rest_framework import status
 from rest_framework.reverse import reverse
-from rest_framework.test import APITestCase
 
-from CloudCart.tests import TenantAPIClient
+from CloudCart.tests import TenantAPITestCase
 from Users.models import User
 
 
-class TestGetSelf(APITestCase, TenantTestCase):
+class TestGetSelf(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('users-get-me', ('v1',))
 
     def test_success(self):
@@ -24,9 +24,11 @@ class TestGetSelf(APITestCase, TenantTestCase):
         self.assertEqual(response_data['id'], str(user.id), "Should return same user")
 
 
-class TestUpdateSelf(APITestCase, TenantTestCase):
+class TestUpdateSelf(TenantAPITestCase):
+    tenant_type = 'public'
+
     def setUp(self):
-        self.client = TenantAPIClient(self.tenant)
+        super().setUp()
         self.url = reverse('users-update', ('v1',))
 
     def test_success(self):
