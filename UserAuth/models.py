@@ -129,12 +129,14 @@ class Authentication(Model):
 class SecondStepVerificationConfig(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
     authentication = OneToOneField(Authentication, on_delete=CASCADE, related_name='secondstep_verification')
+    is_2fa_enabled = BooleanField(default=False)
 
     email = EmailField(max_length=128)
     email_verified = BooleanField(default=False)
-
-    is_2fa_enabled = BooleanField(default=False)
+    email_verified_at = DateTimeField(null=True)
     otp_2fa_enabled = BooleanField(default=False)
+
+    hotp_verfication_enabled = BooleanField(default=False)
 
     is_recovery_generated = BooleanField(default=False)
 
