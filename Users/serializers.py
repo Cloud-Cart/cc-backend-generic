@@ -1,9 +1,19 @@
 from rest_framework.serializers import ModelSerializer
 
+from CloudCart.utils import SerializerOptimizeMixin
 from Users.models import User
 
 
-class UserSerializer(ModelSerializer):
+class UserSerializer(ModelSerializer, SerializerOptimizeMixin):
+    only_fields = [
+        'id',
+        'first_name',
+        'last_name',
+        'is_staff',
+        'is_active',
+        'email'
+    ]
+
     class Meta:
         model = User
         fields = (
