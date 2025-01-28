@@ -1,23 +1,50 @@
+import base64
+
+import jwt
+import requests
+from django.conf import settings
+from django.http import JsonResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from webauthn import generate_registration_options, options_to_json, generate_authentication_options, \
+    verify_registration_response, verify_authentication_response
+from webauthn.helpers import generate_challenge, parse_registration_credential_json, \
+    parse_authentication_credential_json
+from webauthn.helpers.structs import PublicKeyCredentialDescriptor, PublicKeyCredentialType
 
 from UserAuth.authentications import IncompleteLoginAuthentication
 from UserAuth.choices import OTPPurpose
-from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode
+from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode, WebAuthnCredential, \
+    GoogleAuthnCredential
 from UserAuth.permissions import IsOwnAuthenticator
 from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
     TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer, \
-    UpdatePasswordSerializer
+    UpdatePasswordSerializer, AuthenticationMethodsSerializer
 from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
     send_2fa_otp, send_recovered_email_notification
 from Users.models import User
 
 
 class AuthenticationViewSet(GenericViewSet):
+    @action(
+        detail=False,
+        methods=['post'],
+        permission_classes=[AllowAny],
+        serializer_class=AuthenticationMethodsSerializer,
+        url_path='methods'
+    )
+    def authentication_methods(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        return Response(data=ser.data, status=status.HTTP_200_OK)
+
     @action(
         detail=False,
         methods=["POST"],
@@ -47,6 +74,159 @@ class AuthenticationViewSet(GenericViewSet):
         return Response({
             'success': True,
         })
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='b-passkey-registration',
+    )
+    def begin_passkey_registration(self, request, *args, **kwargs):
+        user = User.objects.all().first()
+        challenge = generate_challenge()
+        challenge_base64 = base64.urlsafe_b64encode(challenge).decode('utf-8')
+        request.session['challenge'] = challenge_base64
+        request.session.save()
+
+        options = generate_registration_options(
+            rp_id="localhost",
+            rp_name="Cloud Cart",
+            user_name=user.first_name,
+            user_id=str(user.id).encode(),
+            user_display_name=f"{user.first_name} {user.last_name}",
+            challenge=challenge,
+            exclude_credentials=[
+                PublicKeyCredentialDescriptor(
+                    id=cred.credential_id_byte,
+                    type=PublicKeyCredentialType.PUBLIC_KEY if cred.type == 'public-key' else None,
+                )
+                for cred in user.authentication.webauthn_credentials.all()
+            ]
+        )
+        return Response(options_to_json(options))
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='c-passkey-register',
+        parser_classes=[JSONParser],
+    )
+    def complete_passkey_registration(self, request, *args, **kwargs):
+        credential = request.data
+
+        challenge_base64 = request.session.get('challenge')
+        if not challenge_base64:
+            return Response({"error": "Challenge not found"}, status=400)
+        try:
+            challenge = base64.urlsafe_b64decode(challenge_base64)
+        except Exception as e:
+            return Response({"error": f"Error decoding challenge: {str(e)}"}, status=400)
+
+        user = User.objects.all().first()
+
+        try:
+            reg_credential = parse_registration_credential_json(credential)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+        try:
+            verification_result = verify_registration_response(
+                credential=reg_credential,
+                expected_challenge=challenge,
+                expected_rp_id="localhost",  # This should match your server's RP ID
+                expected_origin="http://localhost:3000",  # Update with your frontend URL
+                require_user_verification=True,
+            )
+        except Exception as e:
+            return Response({"error": f"Verification failed: {str(e)}"}, status=400)
+
+        WebAuthnCredential.objects.create(
+            authentication=user.authentication,
+            credential_id=credential['id'],
+            credential_id_byte=verification_result.credential_id,
+            public_key=verification_result.credential_public_key,
+            sign_count=verification_result.sign_count,
+            type=verification_result.credential_type.value
+        )
+
+        return Response({"success": True})
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='b-passkey-authentication',
+        permission_classes=[AllowAny],
+    )
+    def begin_passkey_authentication(self, request, *args, **kwargs):
+        email = request.query_params.get('email')
+        allow_credentials = []
+        if email:
+            try:
+                auth = Authentication.objects.get(user__email=email)
+            except Authentication.DoesNotExist:
+                pass
+            else:
+                allow_credentials = [
+                    PublicKeyCredentialDescriptor(
+                        id=cred.credential_id_byte,
+                        type=PublicKeyCredentialType.PUBLIC_KEY if cred.type == 'public-key' else None,
+                    )
+                    for cred in auth.webauthn_credentials.all()
+                ]
+
+        challenge = generate_challenge()
+        challenge_base64 = base64.urlsafe_b64encode(challenge).decode('utf-8')
+        request.session['challenge'] = challenge_base64
+        request.session.save()
+        complex_authentication_options = generate_authentication_options(
+            rp_id="localhost",
+            challenge=challenge,
+            allow_credentials=allow_credentials,
+            timeout=12000,
+        )
+        return Response(options_to_json(complex_authentication_options))
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='c-passkey-authentication',
+        permission_classes=[AllowAny],
+        parser_classes=[JSONParser],
+    )
+    def complete_passkey_authentication(self, request, *args, **kwargs):
+        credential = request.data
+
+        challenge_base64 = request.session.get('challenge')
+        if not challenge_base64:
+            return Response({"error": "Challenge not found"}, status=400)
+        try:
+            challenge = base64.urlsafe_b64decode(challenge_base64)
+        except Exception as e:
+            return Response({"error": f"Error decoding challenge: {str(e)}"}, status=400)
+        try:
+            auth_credential = parse_authentication_credential_json(credential)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+        try:
+            web_authn = WebAuthnCredential.objects.get(credential_id=credential['id'])
+        except WebAuthnCredential.DoesNotExist:
+            return Response({"error": "WebAuthnCredential not found"}, status=400)
+        try:
+            verification_result = verify_authentication_response(
+                credential=auth_credential,
+                expected_challenge=challenge,
+                expected_rp_id="localhost",  # This should match your server's RP ID
+                expected_origin="http://localhost:3000",  # Update with your frontend URL
+                require_user_verification=True,
+                credential_public_key=web_authn.public_key,
+                credential_current_sign_count=web_authn.sign_count
+            )
+        except Exception as e:
+            return Response({"error": f"Verification failed: {str(e)}"}, status=400)
+        web_authn.sign_count = verification_result.new_sign_count
+        web_authn.save()
+        auth = web_authn.authentication
+        auth.user.last_login = timezone.now()
+        auth.user.save()
+        return Response(auth.auth_tokens)
 
     @action(
         detail=False,
@@ -293,3 +473,66 @@ class AuthenticationViewSet(GenericViewSet):
         ser.is_valid(raise_exception=True)
         ser.save()
         return Response(ser.data, status=status.HTTP_200_OK)
+
+
+class SocialLoginViewSet(GenericViewSet):
+    @action(
+        methods=['post'],
+        detail=False,
+        url_path='google',
+        url_name='google',
+        permission_classes=[AllowAny],
+    )
+    def google_login(self, request: Request, *args, **kwargs):
+        code = request.data.get('code')
+        if not code:
+            return Response({'error': 'Missing code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        token_url = "https://oauth2.googleapis.com/token"
+        token_data = {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": "http://localhost:3000/auth/google/callback",
+        }
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            return JsonResponse({"success": False, "error": "Token exchange failed"}, status=400)
+        tokens = token_response.json()
+        id_token = tokens.get("id_token")
+
+        try:
+            payload = jwt.decode(id_token, options={"verify_signature": False})
+            email = payload.get("email")
+            name = payload.get("name")
+            email_verified = payload.get("email_verified", False)  # Check email verification status
+        except jwt.ExpiredSignatureError:
+            return JsonResponse({"success": False, "error": "ID token expired"}, status=400)
+        except jwt.InvalidTokenError:
+            return JsonResponse({"success": False, "error": "Invalid ID token"}, status=400)
+
+        if not email_verified:
+            return JsonResponse({"success": False, "error": "Email not verified"}, status=400)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            user = User.objects.create_user(
+                email=email,
+                username=name,
+                first_name=name.split()[0],
+                last_name=" ".join(name.split()[1:]),
+            )
+            user.set_unusable_password()  # User can't log in with a password
+            user.save()
+
+        auth = user.authentication
+        try:
+            google_authn = GoogleAuthnCredential.objects.get(authentication=auth)
+            google_authn.sign_count += 1
+            google_authn.save()
+        except GoogleAuthnCredential.DoesNotExist:
+            GoogleAuthnCredential.objects.create(authentication=auth)
+
+        return Response(auth.auth_tokens)

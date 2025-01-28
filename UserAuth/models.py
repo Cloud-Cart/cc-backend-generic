@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from django.contrib.auth.hashers import make_password, check_password, acheck_password, is_password_usable
 from django.db.models import Model, CASCADE, OneToOneField, UUIDField, Index, CharField, DateTimeField, EmailField, \
-    BooleanField, ForeignKey, PositiveSmallIntegerField
+    BooleanField, ForeignKey, PositiveSmallIntegerField, IntegerField, BinaryField
 from django.utils import timezone
 from pyotp import random_base32, TOTP
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -57,6 +57,8 @@ class OTPAuthentication(Model):
 class Authentication(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
     user = OneToOneField(User, on_delete=CASCADE, related_name='authentication')
+    email = EmailField(unique=True)
+    email_verified = BooleanField(default=False)
     password = CharField(max_length=128, null=True)
     default_method = CharField(
         max_length=128,
@@ -73,6 +75,13 @@ class Authentication(Model):
         indexes = [
             Index(fields=['user']),
         ]
+
+    @property
+    def is_2fa_enabled(self):
+        return SecondStepVerificationConfig.objects.filter(
+            authentication=self,
+            is_2fa_enabled=True
+        ).exists()
 
     @property
     def auth_tokens(self):
@@ -124,6 +133,43 @@ class Authentication(Model):
         Return False if set_unusable_password() has been called for this user.
         """
         return is_password_usable(self.password)
+
+
+class WebAuthnCredential(Model):
+    id = UUIDField(primary_key=True, default=uuid4, editable=False)
+    created_at = DateTimeField(auto_now_add=True)
+    authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='webauthn_credentials')
+    credential_id = CharField(unique=True)
+    credential_id_byte = BinaryField()
+    public_key = BinaryField()
+    sign_count = IntegerField(default=0)
+    type = CharField(max_length=120)
+
+    def __str__(self):
+        return f"Web Authn Credential for {self.authentication_id}"
+
+    class Meta:
+        db_table = 'webauthn_credential'
+        verbose_name = 'Web Authn Credential'
+        verbose_name_plural = 'Web Authn Credentials'
+        indexes = [
+            Index(fields=['authentication']),
+        ]
+
+
+class GoogleAuthnCredential(Model):
+    id = UUIDField(primary_key=True, default=uuid4, editable=False)
+    created_at = DateTimeField(auto_now_add=True)
+    authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='googleauthn_credentials')
+    sign_count = IntegerField(default=0)
+
+    class Meta:
+        db_table = 'googleauthn_credential'
+        verbose_name = 'Google Authn Credential'
+        verbose_name_plural = 'Google Authn Credentials'
+        indexes = [
+            Index(fields=['authentication']),
+        ]
 
 
 class SecondStepVerificationConfig(Model):

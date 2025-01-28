@@ -1,4 +1,5 @@
 from django.db.models import IntegerChoices
+from django.db.models.enums import TextChoices
 from django.utils.translation import gettext_lazy as _
 
 
@@ -7,12 +8,12 @@ class OTPPurpose(IntegerChoices):
     SECOND_STEP_VERIFICATION = (2, _('Second Step Verification'))
 
 
-class DefaultAuthenticationMethod(IntegerChoices):
-    PASSWORD_SIGNIN = (1, _('Password'))
-    PASSKEY_SIGNIN = (2, _('Pass Key'))
-    GOOGLE_SOCIAL_SIGNIN = (3, _('Google Social Sign in'))
-    FACEBOOK_SIGNIN = (4, _('Facebook Sign in'))
-    APPLE_SIGNIN = (5, _('Apple Sign in'))
+class DefaultAuthenticationMethod(TextChoices):
+    PASSWORD_SIGNIN = ('password', _('Password'))
+    PASSKEY_SIGNIN = ('passkey', _('Pass Key'))
+    GOOGLE_SOCIAL_SIGNIN = ('google', _('Google Social Sign in'))
+    FACEBOOK_SIGNIN = ('facebook', _('Facebook Sign in'))
+    APPLE_SIGNIN = ('apple', _('Apple Sign in'))
 
     __empty__ = _('No Default')
 

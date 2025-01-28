@@ -48,6 +48,7 @@ TENANT_TYPES = {
             'django.contrib.admin',
             'Users.apps.UsersConfig',
             'UserAuth.apps.UserauthConfig',
+            'corsheaders',
         ],
         "URLCONF": "CloudCart.urls_public",  # url for the public type here
     },
@@ -61,7 +62,8 @@ TENANT_TYPES = {
             'django.contrib.messages',
             'UserAuth.apps.UserauthConfig',
             'TenantUsers.apps.TenantusersConfig',
-            'TenantEmails.apps.TenantemailsConfig'
+            'TenantEmails.apps.TenantemailsConfig',
+            'corsheaders'
         ],
         "URLCONF": "CloudCart.urls_stores",
     },
@@ -74,6 +76,7 @@ for schema in TENANT_TYPES:
 MIDDLEWARE = [
     'django_tenants.middleware.main.TenantMainMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -143,6 +146,19 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+SESSION_COOKIE_DOMAIN = None  # or '.localhost' for local subdomains
+CSRF_COOKIE_HTTPONLY = False  # Make sure CSRF cookie is accessible
+CSRF_COOKIE_SAMESITE = 'None'  # Allow cross-site cookies (if needed)
+SESSION_COOKIE_NAME = 'sessionid'
+SESSION_COOKIE_SECURE = False  # Only for local development without HTTPS
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
 
@@ -171,7 +187,17 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    'DEFAULT_VERSIONING_CLASS': 'rest_framework.versioning.URLPathVersioning'
+    'DEFAULT_VERSIONING_CLASS': 'rest_framework.versioning.URLPathVersioning',
+    'DEFAULT_RENDERER_CLASSES': (
+        'djangorestframework_camel_case.render.CamelCaseJSONRenderer',
+        'djangorestframework_camel_case.render.CamelCaseBrowsableAPIRenderer',
+    ),
+    'DEFAULT_PARSER_CLASSES': (
+        'djangorestframework_camel_case.parser.CamelCaseFormParser',
+        'djangorestframework_camel_case.parser.CamelCaseMultiPartParser',
+        'djangorestframework_camel_case.parser.CamelCaseJSONParser',
+    ),
+    'EXCEPTION_HANDLER': 'CloudCart.exceptions.custom_exception_handler',
 }
 
 # Default user model
@@ -199,3 +225,7 @@ EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=None)
 EMAIL_SSL_KEYFILE = env.str('EMAIL_SSL_KEYFILE', default=None)
 EMAIL_SSL_CERTFILE = env.str('EMAIL_SSL_CERTFILE', default=None)
 DEFAULT_FROM_EMAIL = env.str('DEFAULT_FROM_EMAIL', None)
+
+# Google Social Login
+GOOGLE_CLIENT_ID = env.str('GOOGLE_CLIENT_ID', default=None)
+GOOGLE_CLIENT_SECRET = env.str('GOOGLE_CLIENT_SECRET', default=None)

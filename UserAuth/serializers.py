@@ -1,11 +1,57 @@
+import os
+
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
-from rest_framework.fields import CharField
+from rest_framework.fields import CharField, SerializerMethodField, EmailField
 from rest_framework.serializers import ModelSerializer, Serializer
 
+from UserAuth.exceptions import UserNotFoundException, UserLoginDeniedException
 from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions, RecoveryCode
 from Users.models import User
+
+
+class AuthenticationMethodsSerializer(ModelSerializer):
+    is_password_available = SerializerMethodField(read_only=True)
+    is_passkey_available = SerializerMethodField(read_only=True)
+    social_accounts = SerializerMethodField(read_only=True)
+    email = EmailField()
+
+    class Meta:
+        model = Authentication
+        fields = [
+            'email',
+            'is_password_available',
+            'is_passkey_available',
+            'social_accounts',
+            'default_method'
+        ]
+        extra_kwargs = {
+            'default_method': {
+                'read_only': True,
+            },
+        }
+
+    def validate_email(self, value: str) -> str:
+        try:
+            self.instance = Authentication.objects.get(email=value)
+        except Authentication.DoesNotExist:
+            raise UserNotFoundException(_('Email does not exist'))
+        if not self.instance.user.is_active:
+            raise UserLoginDeniedException(_('Account is inactive'))
+        return value
+
+    @staticmethod
+    def get_is_password_available(obj: Authentication):
+        return bool(obj.password)
+
+    @staticmethod
+    def get_is_passkey_available(obj: Authentication):
+        return obj.webauthn_credentials.all().exists()
+
+    @staticmethod
+    def get_social_accounts(obj: Authentication):
+        return []
 
 
 class RegisterSerializer(ModelSerializer):
@@ -107,9 +153,17 @@ class AuthenticatorAppSerializer(ModelSerializer):
         return data
 
 
-class LoginSerializer(ModelSerializer):
+class LoginSerializer(Serializer):
     incomplete_session = None
     tokens = None
+    email = EmailField(
+        write_only=True,
+        required=True,
+    )
+    password = CharField(
+        write_only=True,
+        required=True,
+    )
 
     class Meta:
         model = Authentication
@@ -117,10 +171,6 @@ class LoginSerializer(ModelSerializer):
             'email',
             'password'
         ]
-        extra_kwargs = {
-            'password': {'required': True},
-            'email': {'write_only': True, 'required': True},
-        }
 
     def validate(self, attrs):
         email = attrs.get('email')
@@ -319,3 +369,19 @@ class UpdatePasswordSerializer(Serializer):
         self.instance.set_password(self.validated_data.get('new_password'))
         self.instance.save()
         return self.instance
+
+
+class BeginRegisterPasskeySerializer(Serializer):
+    challenge = SerializerMethodField()
+    user_id = CharField(read_only=True)
+    username = CharField(read_only=True, source='user.email')
+    display_name = CharField(read_only=True, source='user.full_name')
+    exclude_credentials = SerializerMethodField()
+
+    @staticmethod
+    def get_challenge(instance: Authentication):
+        return os.urandom(32)
+
+    @staticmethod
+    def get_exclude_credentials(instance: Authentication):
+        return []
