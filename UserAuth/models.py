@@ -10,7 +10,7 @@ from pyotp import random_base32, TOTP
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from CloudCart.celery import app
-from UserAuth.choices import OTPPurpose, DefaultAuthenticationMethod
+from UserAuth.choices import OTPPurpose, DefaultAuthenticationMethod, SocialAuthenticationMethod
 from UserAuth.utils import generate_recovery_codes
 from Users.models import User
 
@@ -157,19 +157,21 @@ class WebAuthnCredential(Model):
         ]
 
 
-class GoogleAuthnCredential(Model):
+class SocialAuthentications(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
     created_at = DateTimeField(auto_now_add=True)
     authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='googleauthn_credentials')
+    account = CharField(max_length=255, choices=SocialAuthenticationMethod.choices)
     sign_count = IntegerField(default=0)
 
     class Meta:
-        db_table = 'googleauthn_credential'
-        verbose_name = 'Google Authn Credential'
-        verbose_name_plural = 'Google Authn Credentials'
+        db_table = 'socialauthn_credential'
+        verbose_name = 'Social Authn Credential'
+        verbose_name_plural = 'Social Authn Credentials'
         indexes = [
             Index(fields=['authentication']),
         ]
+        unique_together = ('authentication', 'account')
 
 
 class SecondStepVerificationConfig(Model):

@@ -229,3 +229,12 @@ DEFAULT_FROM_EMAIL = env.str('DEFAULT_FROM_EMAIL', None)
 # Google Social Login
 GOOGLE_CLIENT_ID = env.str('GOOGLE_CLIENT_ID', default=None)
 GOOGLE_CLIENT_SECRET = env.str('GOOGLE_CLIENT_SECRET', default=None)
+
+# Microsoft Social Login
+MICROSOFT_CLIENT_ID = env.str('MICROSOFT_CLIENT_ID', default=None)
+MICROSOFT_CLIENT_SECRET = env.str('MICROSOFT_CLIENT_SECRET', default=None)
+MICROSOFT_TENANT_ID = env.str('MICROSOFT_TENANT_ID', default=None)
+
+# Facebook Social Login
+FACEBOOK_APP_ID = env.str('FACEBOOK_APP_ID', default=None)
+FACEBOOK_APP_SECRET = env.str('FACEBOOK_APP_SECRET', default=None)

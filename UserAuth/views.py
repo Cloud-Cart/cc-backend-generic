@@ -1,15 +1,11 @@
 import base64
 
-import jwt
-import requests
 from django.conf import settings
-from django.http import JsonResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -21,12 +17,12 @@ from webauthn.helpers.structs import PublicKeyCredentialDescriptor, PublicKeyCre
 
 from UserAuth.authentications import IncompleteLoginAuthentication
 from UserAuth.choices import OTPPurpose
-from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode, WebAuthnCredential, \
-    GoogleAuthnCredential
+from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode, WebAuthnCredential
 from UserAuth.permissions import IsOwnAuthenticator
 from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
     TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer, \
     UpdatePasswordSerializer, AuthenticationMethodsSerializer
+from UserAuth.social_login import SocialAuthHandler
 from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
     send_2fa_otp, send_recovered_email_notification
 from Users.models import User
@@ -476,63 +472,75 @@ class AuthenticationViewSet(GenericViewSet):
 
 
 class SocialLoginViewSet(GenericViewSet):
-    @action(
-        methods=['post'],
-        detail=False,
-        url_path='google',
-        url_name='google',
-        permission_classes=[AllowAny],
-    )
-    def google_login(self, request: Request, *args, **kwargs):
-        code = request.data.get('code')
-        if not code:
-            return Response({'error': 'Missing code'}, status=status.HTTP_400_BAD_REQUEST)
+    permission_classes = [AllowAny]
 
-        token_url = "https://oauth2.googleapis.com/token"
-        token_data = {
-            "client_id": settings.GOOGLE_CLIENT_ID,
-            "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": "http://localhost:3000/auth/google/callback",
+    @staticmethod
+    def social_auth(provider: 'str', code: str):
+        if not code:
+            return Response({"error": "Missing code"}, status=400)
+
+        config = {
+            "google": {
+                "token_url": "https://oauth2.googleapis.com/token",
+                "user_info_url": None,
+                "token_payload": {
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": "http://localhost:3000/auth/callback/google",
+                },
+            },
+            "microsoft": {
+                "token_url": f"https://login.microsoftonline.com/{settings.MICROSOFT_TENANT_ID}/oauth2/v2.0/token",
+                "user_info_url": "https://graph.microsoft.com/v1.0/me",
+                "token_payload": {
+                    "client_id": settings.MICROSOFT_CLIENT_ID,
+                    "client_secret": settings.MICROSOFT_CLIENT_SECRET,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": "http://localhost:3000/auth/callback/microsoft",
+                },
+            },
+            "facebook": {
+                "token_url": "https://graph.facebook.com/v12.0/oauth/access_token",
+                "user_info_url": "https://graph.facebook.com/me?fields=id,name,email,verified",
+                "token_payload": {
+                    "client_id": settings.FACEBOOK_APP_ID,
+                    "client_secret": settings.FACEBOOK_APP_SECRET,
+                    "redirect_uri": "http://localhost:3000/auth/callback/facebook",
+                },
+            },
         }
-        token_response = requests.post(token_url, data=token_data)
-        if token_response.status_code != 200:
-            return JsonResponse({"success": False, "error": "Token exchange failed"}, status=400)
-        tokens = token_response.json()
+
+        if provider not in config:
+            return Response({"error": "Invalid provider"}, status=400)
+
+        handler = SocialAuthHandler(provider, **config[provider])
+        tokens = handler.exchange_code(code)
+        if not tokens:
+            return Response({"error": "Token exchange failed"}, status=400)
+
+        access_token = tokens.get("access_token")
         id_token = tokens.get("id_token")
 
         try:
-            payload = jwt.decode(id_token, options={"verify_signature": False})
-            email = payload.get("email")
-            name = payload.get("name")
-            email_verified = payload.get("email_verified", False)  # Check email verification status
-        except jwt.ExpiredSignatureError:
-            return JsonResponse({"success": False, "error": "ID token expired"}, status=400)
-        except jwt.InvalidTokenError:
-            return JsonResponse({"success": False, "error": "Invalid ID token"}, status=400)
+            email, name = handler.extract_user_info(access_token, id_token)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=400)
 
-        if not email_verified:
-            return JsonResponse({"success": False, "error": "Email not verified"}, status=400)
+        if not email:
+            return Response({"error": "Email not found"}, status=400)
 
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            user = User.objects.create_user(
-                email=email,
-                username=name,
-                first_name=name.split()[0],
-                last_name=" ".join(name.split()[1:]),
-            )
-            user.set_unusable_password()  # User can't log in with a password
-            user.save()
+        user = handler.get_or_create_user(email, name)
+        return Response(user.authentication.auth_tokens)
 
-        auth = user.authentication
-        try:
-            google_authn = GoogleAuthnCredential.objects.get(authentication=auth)
-            google_authn.sign_count += 1
-            google_authn.save()
-        except GoogleAuthnCredential.DoesNotExist:
-            GoogleAuthnCredential.objects.create(authentication=auth)
+    @action(methods=["post"], detail=False, url_path="google")
+    def google_login(self, request, *args, **kwargs):
+        return self.social_auth("google", request.data.get("code"))
 
-        return Response(auth.auth_tokens)
+    @action(methods=["post"], detail=False, url_path="microsoft")
+    def microsoft_login(self, request, *args, **kwargs):
+        return self.social_auth("microsoft", request.data.get("code"))
+
+    @action(methods=["post"], detail=False, url_path="facebook")
+    def facebook_login(self, request, *args, **kwargs):
+        return self.social_auth("facebook", request.data.get("code"))

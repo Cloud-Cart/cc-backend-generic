@@ -17,3 +17,7 @@ class DefaultAuthenticationMethod(TextChoices):
 
     __empty__ = _('No Default')
 
+class SocialAuthenticationMethod(TextChoices):
+    GOOGLE = ('google', _('Google Social Sign in'))
+    FACEBOOK = ('facebook', _('Facebook Sign in'))
+    MICROSOFT = ('microsoft', _('Microsoft Sign in'))
