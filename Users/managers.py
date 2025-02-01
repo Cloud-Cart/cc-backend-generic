@@ -2,6 +2,8 @@ from django.apps import apps
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.hashers import make_password
 
+from UserAuth.choices import DefaultAuthenticationMethod
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -16,7 +18,13 @@ class UserManager(BaseUserManager):
         user = self.model(email=email, **extra_fields)
         user.save(using=self._db)
         Authentication = apps.get_model(app_label='UserAuth', model_name='Authentication')
-        Authentication.objects.create(user=user, email=email, password=make_password(password))
+        Authentication.objects.create(
+            user=user,
+            email=email,
+            email_verified=True,
+            password=make_password(password),
+            default_method=DefaultAuthenticationMethod.PASSWORD_SIGNIN
+        )
         return user
 
     def create_user(self, email=None, password=None, **extra_fields):

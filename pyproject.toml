@@ -17,6 +17,10 @@ celery = {extras = ["redis"], version = "^5.4.0"}
 gevent = "^24.10.3"
 tenant-schemas-celery = "^3.0.0"
 pyotp = "^2.9.0"
+django-cors-headers = "^4.6.0"
+djangorestframework-camel-case = "^1.4.2"
+py-webauthn = "^0.0.4"
+webauthn = "^2.5.0"
 
 
 [build-system]

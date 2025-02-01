@@ -33,6 +33,10 @@ class User(AbstractUser):
         verbose_name = 'User'
         verbose_name_plural = 'Users'
 
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"
+
     def set_password(self, raw_password):
         r = self.authentication.set_password(raw_password)
         self._save_auth = True
