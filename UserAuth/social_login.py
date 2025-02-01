@@ -1,6 +1,7 @@
 import jwt
 import requests
 
+from UserAuth.models import SocialAuthentications
 from Users.models import User
 
 
@@ -10,9 +11,11 @@ class SocialAuthHandler:
         self.token_url = token_url
         self.user_info_url = user_info_url
         self.token_payload = token_payload
+        self.user = None
 
-    def exchange_code(self, code):
+    def exchange_code(self, code, redirect_uri):
         self.token_payload["code"] = code
+        self.token_payload["redirect_uri"] = redirect_uri
         response = requests.post(self.token_url, data=self.token_payload)
         return response.json() if response.status_code == 200 else None
 
@@ -36,8 +39,7 @@ class SocialAuthHandler:
             name = user_info.get("displayName") or user_info.get("name")
         return email, name
 
-    @staticmethod
-    def get_or_create_user(email: str, name: str) -> User:
+    def get_or_create_user(self, email: str, name: str) -> User:
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
@@ -49,4 +51,15 @@ class SocialAuthHandler:
         if created:
             user.set_unusable_password()
             user.save()
+        self.user = user
         return user
+
+    def create_auth(self):
+        social_auth, created = SocialAuthentications.objects.get_or_create(
+            authentication_id=self.user.authentication.id,
+            account=self.provider
+        )
+        if not created:
+            social_auth.sign_count += 1
+            social_auth.save()
+        return social_auth

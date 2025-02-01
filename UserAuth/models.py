@@ -160,7 +160,7 @@ class WebAuthnCredential(Model):
 class SocialAuthentications(Model):
     id = UUIDField(primary_key=True, default=uuid4, editable=False)
     created_at = DateTimeField(auto_now_add=True)
-    authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='googleauthn_credentials')
+    authentication = ForeignKey(Authentication, on_delete=CASCADE, related_name='social_authentications')
     account = CharField(max_length=255, choices=SocialAuthenticationMethod.choices)
     sign_count = IntegerField(default=0)
 

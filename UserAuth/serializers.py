@@ -6,7 +6,6 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, SerializerMethodField, EmailField
 from rest_framework.serializers import ModelSerializer, Serializer
 
-from UserAuth.exceptions import UserNotFoundException, UserLoginDeniedException
 from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions, RecoveryCode
 from Users.models import User
 
@@ -36,9 +35,9 @@ class AuthenticationMethodsSerializer(ModelSerializer):
         try:
             self.instance = Authentication.objects.get(email=value)
         except Authentication.DoesNotExist:
-            raise UserNotFoundException(_('Email does not exist'))
+            raise ValidationError(_('Email does not exist'))
         if not self.instance.user.is_active:
-            raise UserLoginDeniedException(_('Account is inactive'))
+            raise ValidationError(_('Account is inactive'))
         return value
 
     @staticmethod
@@ -51,7 +50,7 @@ class AuthenticationMethodsSerializer(ModelSerializer):
 
     @staticmethod
     def get_social_accounts(obj: Authentication):
-        return []
+        return list(obj.social_authentications.all().values_list('account', flat=True))
 
 
 class RegisterSerializer(ModelSerializer):
@@ -179,11 +178,17 @@ class LoginSerializer(Serializer):
         try:
             auth = Authentication.objects.get(email=email)
         except Authentication.DoesNotExist:
-            raise ValidationError(_('User does not exist.'))
+            raise ValidationError({
+                'email': _('User does not exist.')
+            })
         if not (auth.email_verified and auth.user.is_active):
-            raise ValidationError(_('Email verification failed.'))
+            raise ValidationError({
+                'email': _('User is inactive.')
+            })
         if not auth.check_password(password):
-            raise ValidationError(_('Incorrect password.'))
+            raise ValidationError({
+                'password': _('Password is incorrect.')
+            })
         self.instance = auth
         return attrs
 

@@ -475,7 +475,7 @@ class SocialLoginViewSet(GenericViewSet):
     permission_classes = [AllowAny]
 
     @staticmethod
-    def social_auth(provider: 'str', code: str):
+    def social_auth(provider: str, code: str, redirect_uri: str):
         if not code:
             return Response({"error": "Missing code"}, status=400)
 
@@ -487,7 +487,6 @@ class SocialLoginViewSet(GenericViewSet):
                     "client_id": settings.GOOGLE_CLIENT_ID,
                     "client_secret": settings.GOOGLE_CLIENT_SECRET,
                     "grant_type": "authorization_code",
-                    "redirect_uri": "http://localhost:3000/auth/callback/google",
                 },
             },
             "microsoft": {
@@ -497,7 +496,6 @@ class SocialLoginViewSet(GenericViewSet):
                     "client_id": settings.MICROSOFT_CLIENT_ID,
                     "client_secret": settings.MICROSOFT_CLIENT_SECRET,
                     "grant_type": "authorization_code",
-                    "redirect_uri": "http://localhost:3000/auth/callback/microsoft",
                 },
             },
             "facebook": {
@@ -506,7 +504,6 @@ class SocialLoginViewSet(GenericViewSet):
                 "token_payload": {
                     "client_id": settings.FACEBOOK_APP_ID,
                     "client_secret": settings.FACEBOOK_APP_SECRET,
-                    "redirect_uri": "http://localhost:3000/auth/callback/facebook",
                 },
             },
         }
@@ -515,7 +512,7 @@ class SocialLoginViewSet(GenericViewSet):
             return Response({"error": "Invalid provider"}, status=400)
 
         handler = SocialAuthHandler(provider, **config[provider])
-        tokens = handler.exchange_code(code)
+        tokens = handler.exchange_code(code, redirect_uri)
         if not tokens:
             return Response({"error": "Token exchange failed"}, status=400)
 
@@ -531,16 +528,17 @@ class SocialLoginViewSet(GenericViewSet):
             return Response({"error": "Email not found"}, status=400)
 
         user = handler.get_or_create_user(email, name)
+        handler.create_auth()
         return Response(user.authentication.auth_tokens)
 
     @action(methods=["post"], detail=False, url_path="google")
     def google_login(self, request, *args, **kwargs):
-        return self.social_auth("google", request.data.get("code"))
+        return self.social_auth("google", request.data.get("code"), request.data.get("redirect_uri"))
 
     @action(methods=["post"], detail=False, url_path="microsoft")
     def microsoft_login(self, request, *args, **kwargs):
-        return self.social_auth("microsoft", request.data.get("code"))
+        return self.social_auth("microsoft", request.data.get("code"), request.data.get("redirect_uri"))
 
     @action(methods=["post"], detail=False, url_path="facebook")
     def facebook_login(self, request, *args, **kwargs):
-        return self.social_auth("facebook", request.data.get("code"))
+        return self.social_auth("facebook", request.data.get("code"), request.data.get("redirect_uri"))

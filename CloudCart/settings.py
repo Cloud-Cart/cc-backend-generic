@@ -197,7 +197,6 @@ REST_FRAMEWORK = {
         'djangorestframework_camel_case.parser.CamelCaseMultiPartParser',
         'djangorestframework_camel_case.parser.CamelCaseJSONParser',
     ),
-    'EXCEPTION_HANDLER': 'CloudCart.exceptions.custom_exception_handler',
 }
 
 # Default user model
