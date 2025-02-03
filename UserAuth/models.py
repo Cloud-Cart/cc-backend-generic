@@ -46,7 +46,7 @@ class OTPAuthentication(Model):
         otp = random.randint(100000, 999999)
         cls.objects.filter(authentication=auth).delete()
         obj = cls.objects.create(authentication=auth, otp_purpose=purpose)
-        obj.set_otp(otp)
+        obj.set_otp(otp, validity_minutes=15)
         obj.save()
         return otp
 

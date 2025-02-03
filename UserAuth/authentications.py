@@ -18,4 +18,4 @@ class IncompleteLoginAuthentication(BaseAuthentication):
         return session.auth.user, session_id
 
     def authenticate_header(self, request):
-        return request.headers.get('Incomplete-Session')
+        return request.session.get('incomplete_login_session_id')

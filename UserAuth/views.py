@@ -1,14 +1,16 @@
 import base64
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-from rest_framework_simplejwt.authentication import JWTAuthentication
 from webauthn import generate_registration_options, options_to_json, generate_authentication_options, \
     verify_registration_response, verify_authentication_response
 from webauthn.helpers import generate_challenge, parse_registration_credential_json, \
@@ -17,11 +19,12 @@ from webauthn.helpers.structs import PublicKeyCredentialDescriptor, PublicKeyCre
 
 from UserAuth.authentications import IncompleteLoginAuthentication
 from UserAuth.choices import OTPPurpose
-from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode, WebAuthnCredential
+from UserAuth.models import OTPAuthentication, HOTPAuthentication, Authentication, RecoveryCode, WebAuthnCredential, \
+    SecondStepVerificationConfig
 from UserAuth.permissions import IsOwnAuthenticator
-from UserAuth.serializers import RegisterSerializer, VerifyOTPSerializer, AuthenticatorAppSerializer, LoginSerializer, \
-    TwoFactorSettingsSerializer, CompleteLoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer, \
-    UpdatePasswordSerializer, AuthenticationMethodsSerializer
+from UserAuth.serializers import RegisterSerializer, VerifyEmailOTPSerializer, AuthenticatorAppSerializer, \
+    LoginSerializer, RecoverAccountSerializer, RecoveryCodeSerializer, \
+    UpdatePasswordSerializer, AuthenticationMethodsSerializer, TwoFactorSettingsSerializer, VerifyHOTPAppSerializer
 from UserAuth.social_login import SocialAuthHandler
 from UserAuth.tasks import send_new_authentication_app_created_email, generate_and_send_verification_otp, \
     send_2fa_otp, send_recovered_email_notification
@@ -29,18 +32,6 @@ from Users.models import User
 
 
 class AuthenticationViewSet(GenericViewSet):
-    @action(
-        detail=False,
-        methods=['post'],
-        permission_classes=[AllowAny],
-        serializer_class=AuthenticationMethodsSerializer,
-        url_path='methods'
-    )
-    def authentication_methods(self, request, *args, **kwargs):
-        ser = self.get_serializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        return Response(data=ser.data, status=status.HTTP_200_OK)
-
     @action(
         detail=False,
         methods=["POST"],
@@ -52,24 +43,6 @@ class AuthenticationViewSet(GenericViewSet):
         user = ser.save()
         generate_and_send_verification_otp.delay(str(user.id))
         return Response(data=ser.data, status=status.HTTP_201_CREATED)
-
-    @action(
-        detail=True,
-        methods=["POST"],
-        serializer_class=VerifyOTPSerializer,
-        url_path='verify-otp',
-        lookup_field='authentication__user_id',
-        lookup_url_kwarg='pk',
-        queryset=OTPAuthentication
-    )
-    def verify_otp(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance=instance, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response({
-            'success': True,
-        })
 
     @action(
         detail=False,
@@ -225,22 +198,6 @@ class AuthenticationViewSet(GenericViewSet):
         return Response(auth.auth_tokens)
 
     @action(
-        detail=False,
-        url_path='login',
-        methods=['POST'],
-        serializer_class=LoginSerializer
-    )
-    def login(self, request, *args, **kwargs):
-        ser = self.get_serializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        auth = ser.save()
-        if auth.is_2fa_enabled:
-            status_code = status.HTTP_206_PARTIAL_CONTENT
-        else:
-            status_code = status.HTTP_200_OK
-        return Response(ser.data, status=status_code)
-
-    @action(
         url_path='create-hotp-authentication',
         methods=['POST'],
         serializer_class=AuthenticatorAppSerializer,
@@ -260,7 +217,6 @@ class AuthenticationViewSet(GenericViewSet):
     @action(
         url_path='activate-hotp-authentication',
         methods=['PATCH'],
-        serializer_class=VerifyOTPSerializer,
         permission_classes=[IsOwnAuthenticator],
         detail=True,
         queryset=HOTPAuthentication.objects.all()
@@ -375,46 +331,6 @@ class AuthenticationViewSet(GenericViewSet):
 
     @action(
         detail=False,
-        methods=["GET"],
-        url_path='2fa',
-        permission_classes=[IsAuthenticated],
-        serializer_class=TwoFactorSettingsSerializer,
-        authentication_classes=(IncompleteLoginAuthentication, JWTAuthentication)
-    )
-    def get_2fa_settings(self, request, *args, **kwargs):
-        auth = request.user.authentication
-        ser = self.get_serializer(instance=auth)
-        return Response(ser.data)
-
-    @action(
-        detail=False,
-        methods=["GET"],
-        url_path='request-2fa-otp',
-        permission_classes=[IsAuthenticated],
-        authentication_classes=(IncompleteLoginAuthentication,)
-    )
-    def request_2fa_otp(self, request, *args, **kwargs):
-        user: User = request.user
-        otp = OTPAuthentication.generate_otp(user.authentication, OTPPurpose.SECOND_STEP_VERIFICATION)
-        send_2fa_otp.delay(str(user.id), otp)
-        return Response(data={}, status=status.HTTP_200_OK)
-
-    @action(
-        detail=False,
-        methods=["POST"],
-        url_path='complete-login',
-        permission_classes=[IsAuthenticated],
-        authentication_classes=(IncompleteLoginAuthentication,),
-        serializer_class=CompleteLoginSerializer
-    )
-    def complete_login(self, request, *args, **kwargs):
-        ser = self.get_serializer(data=request.data, instance=request.user.authentication)
-        ser.is_valid(raise_exception=True)
-        ser.save()
-        return Response(ser.data, status=status.HTTP_200_OK)
-
-    @action(
-        detail=False,
         methods=["POST"],
         url_path="recover-account",
         permission_classes=[AllowAny],
@@ -471,11 +387,122 @@ class AuthenticationViewSet(GenericViewSet):
         return Response(ser.data, status=status.HTTP_200_OK)
 
 
+class LoginViewSet(GenericViewSet):
+    @action(
+        detail=False,
+        methods=['post'],
+        permission_classes=[AllowAny],
+        serializer_class=AuthenticationMethodsSerializer,
+        url_path='methods'
+    )
+    def authentication_methods(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        return Response(data=ser.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        url_path='password',
+        methods=['POST'],
+        serializer_class=LoginSerializer
+    )
+    def login(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        auth = ser.save()
+        if auth.is_2fa_enabled:
+            status_code = status.HTTP_206_PARTIAL_CONTENT
+            data = ser.data
+            session_id = data['session_id']
+            request.session['incomplete_login_session_id'] = str(session_id)
+            request.session.set_expiry(timedelta(minutes=30))
+            request.session.save()
+            data = {}
+        else:
+            status_code = status.HTTP_200_OK
+            data = ser.data
+        return Response(data, status=status_code)
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path='2fa-methods',
+        permission_classes=[IsAuthenticated],
+        serializer_class=TwoFactorSettingsSerializer,
+        authentication_classes=(IncompleteLoginAuthentication,)
+    )
+    def get_2fa_settings(self, request: Request, *args, **kwargs):
+        auth = request.user.authentication
+        try:
+            second_config = SecondStepVerificationConfig.objects.get(authentication=auth)
+            if not second_config.is_2fa_enabled:
+                request.session.delete('incomplete_login_session_id')
+                raise ValidationError('Second Step Verification not enabled')
+        except SecondStepVerificationConfig.DoesNotExist:
+            request.session.delete('incomplete_login_session_id')
+            raise ValidationError('Second Step Verification not enabled')
+        ser = self.get_serializer(instance=second_config)
+        return Response(ser.data)
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path='request-2fa-otp',
+        permission_classes=[IsAuthenticated],
+        authentication_classes=(IncompleteLoginAuthentication,)
+    )
+    def request_2fa_otp(self, request, *args, **kwargs):
+        user: User = request.user
+        otp = OTPAuthentication.generate_otp(user.authentication, OTPPurpose.SECOND_STEP_VERIFICATION)
+        send_2fa_otp.delay(str(user.id), otp)
+        return Response(data={}, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["POST"],
+        serializer_class=VerifyEmailOTPSerializer,
+        url_path='verify-email-otp',
+        authentication_classes=(IncompleteLoginAuthentication,),
+        permission_classes=[IsAuthenticated],
+    )
+    def verify_email_otp(self, request, *args, **kwargs):
+        try:
+            otp_authentication: OTPAuthentication = request.user.authentication.otp
+        except OTPAuthentication.DoesNotExist:
+            raise PermissionDenied('Session invalid')
+
+        serializer = self.get_serializer(instance=otp_authentication, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        request.session.delete('incomplete_login_session_id')
+        return Response(otp_authentication.authentication.auth_tokens)
+
+    @action(
+        detail=False,
+        methods=["POST"],
+        serializer_class=VerifyHOTPAppSerializer,
+        url_path='verify-app-otp',
+        authentication_classes=(IncompleteLoginAuthentication,),
+        permission_classes=[IsAuthenticated],
+    )
+    def verify_app_otp(self, request, *args, **kwargs):
+        try:
+            second_step_config: OTPAuthentication = request.user.authentication.secondstep_verification
+        except SecondStepVerificationConfig.DoesNotExist:
+            raise PermissionDenied('Session invalid')
+
+        serializer = self.get_serializer(instance=second_step_config, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        request.session.delete('incomplete_login_session_id')
+        return Response(second_step_config.authentication.auth_tokens)
+
+
 class SocialLoginViewSet(GenericViewSet):
     permission_classes = [AllowAny]
 
     @staticmethod
-    def social_auth(provider: str, code: str, redirect_uri: str):
+    def social_auth(request: Request, provider: str, code: str, redirect_uri: str):
         if not code:
             return Response({"error": "Missing code"}, status=400)
 
@@ -529,16 +556,29 @@ class SocialLoginViewSet(GenericViewSet):
 
         user = handler.get_or_create_user(email, name)
         handler.create_auth()
-        return Response(user.authentication.auth_tokens)
+        ser = LoginSerializer(user.authentication)
+        ser.save()
+        if user.authentication.is_2fa_enabled:
+            status_code = status.HTTP_206_PARTIAL_CONTENT
+            data = ser.data
+            session_id = data['session_id']
+            request.session['incomplete_login_session_id'] = str(session_id)
+            request.session.set_expiry(timedelta(minutes=30))
+            request.session.save()
+            data = {}
+        else:
+            status_code = status.HTTP_200_OK
+            data = ser.data
+        return Response(data, status=status_code)
 
     @action(methods=["post"], detail=False, url_path="google")
     def google_login(self, request, *args, **kwargs):
-        return self.social_auth("google", request.data.get("code"), request.data.get("redirect_uri"))
+        return self.social_auth(request, "google", request.data.get("code"), request.data.get("redirect_uri"))
 
     @action(methods=["post"], detail=False, url_path="microsoft")
     def microsoft_login(self, request, *args, **kwargs):
-        return self.social_auth("microsoft", request.data.get("code"), request.data.get("redirect_uri"))
+        return self.social_auth(request, "microsoft", request.data.get("code"), request.data.get("redirect_uri"))
 
     @action(methods=["post"], detail=False, url_path="facebook")
     def facebook_login(self, request, *args, **kwargs):
-        return self.social_auth("facebook", request.data.get("code"), request.data.get("redirect_uri"))
+        return self.social_auth(request, "facebook", request.data.get("code"), request.data.get("redirect_uri"))

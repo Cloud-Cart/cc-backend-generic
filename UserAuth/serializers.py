@@ -1,4 +1,5 @@
 import os
+import re
 
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -6,7 +7,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, SerializerMethodField, EmailField
 from rest_framework.serializers import ModelSerializer, Serializer
 
-from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions, RecoveryCode
+from UserAuth.models import Authentication, HOTPAuthentication, OTPAuthentication, IncompleteLoginSessions, \
+    RecoveryCode, SecondStepVerificationConfig
 from Users.models import User
 
 
@@ -86,37 +88,28 @@ class RegisterSerializer(ModelSerializer):
         return self.instance
 
 
-class VerifyOTPSerializer(Serializer):
+class VerifyEmailOTPSerializer(Serializer):
     otp = CharField(write_only=True)
+
+    class Meta:
+        model = OTPAuthentication
 
     def validate_otp(self, value):
         if not self.instance:
             raise AssertionError('Pass instance to validate VerifyOTPSerializer.')
         if not self.instance.verify_otp(value):
-            raise ValidationError(_('OTP verification failed.'))
+            raise ValidationError(_('Invalid OTP.'))
         return value
 
     def save(self):
-        if isinstance(self.instance, OTPAuthentication):
-            auth: Authentication = self.instance.authentication
-            auth.email_verified = True
-            auth.save()
-            user = auth.user
-            user.is_active = True
-            user.save()
-            self.instance.delete()
-            return user
-        if isinstance(self.instance, HOTPAuthentication):
-            app: HOTPAuthentication = self.instance
-            app.is_active = True
-            app.save()
-            return app
-        return None
-
-    class Meta:
-        fields = [
-            'otp'
-        ]
+        auth: Authentication = self.instance.authentication
+        auth.email_verified = True
+        auth.save()
+        user = auth.user
+        user.is_active = True
+        user.save()
+        self.instance.delete()
+        return user
 
     def to_representation(self, instance):
         return AuthenticatorAppSerializer(instance).data
@@ -130,12 +123,12 @@ class AuthenticatorAppSerializer(ModelSerializer):
             'name',
             'is_active',
             'created_at',
-            'authentication_id'
+            'second_step_config_id'
         ]
         extra_kwargs = {
             'is_active': {'read_only': True},
             'created_at': {'read_only': True},
-            'authentication_id': {'read_only': True},
+            'second_step_config_id': {'read_only': True},
         }
 
     def validate_name(self, value):
@@ -212,13 +205,16 @@ class LoginSerializer(Serializer):
 
 class TwoFactorSettingsSerializer(ModelSerializer):
     apps = AuthenticatorAppSerializer(many=True, read_only=True, source='hotp_authentications')
+    email = SerializerMethodField()
 
     class Meta:
-        model = Authentication
+        model = SecondStepVerificationConfig
         fields = [
             'is_2fa_enabled',
             'otp_2fa_enabled',
-            'apps'
+            'apps',
+            'email',
+            'hotp_verfication_enabled'
         ]
         extra_kwargs = {
             'is_2fa_enabled': {
@@ -229,42 +225,30 @@ class TwoFactorSettingsSerializer(ModelSerializer):
             }
         }
 
+    @staticmethod
+    def get_email(instance: SecondStepVerificationConfig):
+        if not (instance.otp_2fa_enabled and instance.email_verified):
+            return None
+        match = re.match(r"([^@]+)@(.+)", instance.email)
+        if not match:
+            return None
+        return f"{match.group(1)[:3]}****@{match.group(2)}"
 
-class CompleteLoginSerializer(Serializer):
-    email_otp = CharField(write_only=True, required=False)
-    authenticator_otp = CharField(write_only=True, required=False)
+
+class VerifyHOTPAppSerializer(Serializer):
+    otp = CharField(write_only=True)
 
     def validate(self, attrs):
-        if not self.instance:
-            raise AssertionError('Pass instance to validate CompleteLoginSerializer.')
+        otp: str = attrs.get('otp')
+        config: SecondStepVerificationConfig = self.instance
 
-        email_otp: str = attrs.get('email_otp')
-        authenticator_otp: str = attrs.get('authenticator_otp')
-        auth: Authentication = self.instance
-
-        if not auth.is_2fa_enabled:
+        if not config.is_2fa_enabled:
             raise ValidationError(_('2 Step Verification not enabled.'))
 
-        if email_otp and authenticator_otp:
-            raise ValidationError(_('OTP verification failed. Use any one of the method.'))
-
-        if not (email_otp or authenticator_otp):
-            raise ValidationError({'email_otp': _('This field is required.')})
-
-        if email_otp:
-            if not auth.otp_2fa_enabled:
-                raise ValidationError(_('OTP Verification failed. Use any of the available method'))
-            try:
-                otp_auth = OTPAuthentication.objects.get(authentication_id=auth.id)
-                if not otp_auth.verify_otp(email_otp):
-                    raise ValidationError(_('OTP verification failed.'))
-            except OTPAuthentication.DoesNotExist:
-                raise ValidationError(_('OTP verification failed.'))
-        else:
-            if not auth.hotp_authentications.filter(is_active=True).exists():
-                raise ValidationError(_('OTP verification failed. Use any of the available method.'))
-            if not self.verify_authenticator_app(authenticator_otp):
-                raise ValidationError(_('OTP verification failed. Invalid OTP'))
+        if not config.hotp_authentications.filter(is_active=True).exists():
+            raise ValidationError(_('OTP verification failed. Use any of the available method.'))
+        if not self.verify_authenticator_app(otp):
+            raise ValidationError(_('OTP verification failed. Invalid OTP'))
         return attrs
 
     def verify_authenticator_app(self, otp):
@@ -277,7 +261,7 @@ class CompleteLoginSerializer(Serializer):
         return False
 
     def save(self, **kwargs):
-        IncompleteLoginSessions.objects.filter(auth=self.instance).delete()
+        IncompleteLoginSessions.objects.filter(auth_id=self.instance.authentication_id).delete()
 
     def to_representation(self, instance: Authentication):
         return instance.auth_tokens
